@@ -1,13 +1,15 @@
 #![no_std]
 #![no_main]
 
+use embassy_time::Duration;
 use embedded_dal::drivers::nt35510::*;
-use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
+//use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
+use embedded_dal::test_images::systemscape::FRAMEBUFFER;
 
 use defmt::*;
 use embassy_stm32::{
     dsihost::{blocking_delay_ms, DsiHost, PacketType},
-    gpio::{Level, Output, Speed},
+    gpio::{Input, Level, Output, Pull, Speed},
     ltdc::Ltdc,
     pac::{
         dsihost::regs::{Ier0, Ier1},
@@ -71,80 +73,47 @@ fn main() -> ! {
     let p = embassy_stm32::init(config);
     info!("Starting...");
 
-        /*
-       BSP_LCD_Reset()
+    /*
+       BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
     */
 
     // According to UM for the discovery kit, PH7 is an active-low reset for the LCD and touchsensor
     let mut reset = Output::new(p.PH7, Level::Low, Speed::High);
 
-    // CubeMX example waits 20 ms before de-asserting reset
+    // CubeMX example waits 20 ms before de-asserting reset. Must be at least 5ms for the touch screen.
     embassy_time::block_for(embassy_time::Duration::from_millis(20));
 
     // Disable the reset signal and wait 140ms as in the Linux driver (CubeMX waits only 20)
     reset.set_high();
     embassy_time::block_for(embassy_time::Duration::from_millis(140));
 
-
     // BEGIN TOUCHSCREEN
 
-    let mut ts_reset = Output::new(
-        p.PJ5,
-        Level::Low,
-        Speed::High,
+    // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
+    //embassy_time::block_for(embassy_time::Duration::from_millis(160));
+
+    //let mut ts_int = Input::new(p.PJ5, Pull::None);
+
+    let mut i2c =
+        embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), Default::default());
+
+
+    let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
+        i2c,
+        0x38,
+        embedded_dal::drivers::ft6x36::Dimension(LCD_Y_Size, LCD_X_Size),
     );
-    embassy_time::block_for(embassy_time::Duration::from_micros(500));
-    ts_reset.set_high();
-
-    for _ in 1..=10 {
-        unsafe {
-            let mut scl = Output::new(
-                embassy_stm32::peripherals::PB8::steal(),
-                Level::High,
-                Speed::High,
-            );
-
-            blocking_delay_ms(1);
-            scl.set_low();
-            blocking_delay_ms(1);
-        }
-    }
-
-    let mut i2c_config = embassy_stm32::i2c::Config::default();
-    i2c_config.timeout = embassy_time::Duration::from_millis(10);
-    let mut i2c = embassy_stm32::i2c::I2c::new_blocking(
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        Hertz(100_000),
-        i2c_config,
-    );
-
-
-
-    let mut data = [0u8; 13];
-
-    match i2c.blocking_write_read(0x70, &[0xa8], &mut data) {
-        Ok(()) => info!("Whoami: {:#?}", data),
-        Err(embassy_stm32::i2c::Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
-
-
-    let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(i2c, 0x70, embedded_dal::drivers::ft6x36::Dimension(LCD_Y_Size, LCD_X_Size));
-    
 
     touch_screen.init().unwrap();
 
     match touch_screen.get_info() {
-        Some(info) => info!("Got touch screen info."),
+        Some(info) => info!("Got touch screen info: {:#?}", info),
         None => warn!("No info"),
     }
 
     // END TOUCHSCREEN
 
     let mut led = Output::new(p.PG6, Level::High, Speed::Low);
-
 
     /*
     BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
@@ -153,7 +122,7 @@ fn main() -> ! {
     let mut ltdc = Ltdc::new(p.LTDC);
     let mut dsi = DsiHost::new(p.DSIHOST, p.PJ2);
     let version = dsi.get_version();
-    defmt::warn!("en: {:x}", version);
+    defmt::warn!("DSI IP Version: {:x}", version);
 
     /*
         HAL_DSI_DeInit()
@@ -633,10 +602,10 @@ fn main() -> ! {
     */
 
     /* Initialize the LCD pixel width and pixel height */
-    const WindowX0: u16 = 100;
-    const WindowX1: u16 = 100 + 60; //LCD_X_Size; // 60 for camera
-    const WindowY0: u16 = 100;
-    const WindowY1: u16 = 100 + 60; //LCD_Y_Size; // 60 for camera
+    const WindowX0: u16 = 0;//100;
+    const WindowX1: u16 = LCD_X_Size;//100 + 60; // // 60 for camera
+    const WindowY0: u16 = 0;//100;
+    const WindowY1: u16 = LCD_Y_Size;//100 + 60; //LCD_Y_Size; // 60 for camera
     const PixelFormat: Pf = Pf::ARGB8888;
     //const FBStartAdress: u16 = FB_Address;
     const Alpha: u8 = 255;
@@ -644,8 +613,8 @@ fn main() -> ! {
     const BackcolorBlue: u8 = 0;
     const BackcolorGreen: u8 = 0;
     const BackcolorRed: u8 = 0;
-    const ImageWidth: u16 = 60; //LCD_X_Size; // 60 for camera
-    const ImageHeight: u16 = 60; //LCD_Y_Size; // 60 for camera
+    const ImageWidth: u16 = LCD_X_Size;//60; //LCD_X_Size; // 60 for camera
+    const ImageHeight: u16 = LCD_Y_Size;//60; //LCD_Y_Size; // 60 for camera
 
     /*:
     ######################################
@@ -724,7 +693,7 @@ fn main() -> ! {
     ######################################
     */
 
-    blocking_delay_ms(5000);
+    blocking_delay_ms(500);
 
     /*/
 
@@ -745,6 +714,18 @@ fn main() -> ! {
     blocking_delay_ms(500);
 
     */
+
+    loop {
+        let event = touch_screen.get_touch_event().unwrap();
+        info!("Got event: {:#?}", event);
+
+        if let Some(_) = event.p1 {
+            embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0xFF);
+        } else {
+            embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0x20);
+        }
+        embassy_time::block_for(Duration::from_millis(100));
+    }
 
     info!("Config done, start blinking LED");
     loop {

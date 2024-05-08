@@ -11,6 +11,10 @@ license = "MIT"
 categories = ["no-std", "embedded", "visualization"]
 readme = "README.md"
 
+[features]
+default = ["defmt"]
+defmt = ["dep:defmt"]
+
 [dependencies]
 embassy-stm32 = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = [
     "defmt",
@@ -28,7 +32,7 @@ embassy-time = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5b
 
 embedded-hal = "1.0.0"
 
-defmt = "0.3"
+defmt = {version = "0.3", optional = true }
 defmt-rtt = "0.4"
 
 panic-probe = { version = "0.3", features = ["print-defmt"] }
