@@ -1,9 +1,8 @@
 #![no_std]
 #![no_main]
 
-
-use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
 use embedded_dal::drivers::nt35510::*;
+use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
 
 use defmt::*;
 use embassy_stm32::{
@@ -19,7 +18,7 @@ use embassy_stm32::{
         AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv,
         PllRDiv, PllSource, Sysclk,
     },
-    time::mhz,
+    time::{mhz, Hertz},
 };
 
 use {defmt_rtt as _, panic_probe as _};
@@ -72,9 +71,7 @@ fn main() -> ! {
     let p = embassy_stm32::init(config);
     info!("Starting...");
 
-    let mut led = Output::new(p.PG6, Level::High, Speed::Low);
-
-    /*
+        /*
        BSP_LCD_Reset()
     */
 
@@ -87,6 +84,67 @@ fn main() -> ! {
     // Disable the reset signal and wait 140ms as in the Linux driver (CubeMX waits only 20)
     reset.set_high();
     embassy_time::block_for(embassy_time::Duration::from_millis(140));
+
+
+    // BEGIN TOUCHSCREEN
+
+    let mut ts_reset = Output::new(
+        p.PJ5,
+        Level::Low,
+        Speed::High,
+    );
+    embassy_time::block_for(embassy_time::Duration::from_micros(500));
+    ts_reset.set_high();
+
+    for _ in 1..=10 {
+        unsafe {
+            let mut scl = Output::new(
+                embassy_stm32::peripherals::PB8::steal(),
+                Level::High,
+                Speed::High,
+            );
+
+            blocking_delay_ms(1);
+            scl.set_low();
+            blocking_delay_ms(1);
+        }
+    }
+
+    let mut i2c_config = embassy_stm32::i2c::Config::default();
+    i2c_config.timeout = embassy_time::Duration::from_millis(10);
+    let mut i2c = embassy_stm32::i2c::I2c::new_blocking(
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        Hertz(100_000),
+        i2c_config,
+    );
+
+
+
+    let mut data = [0u8; 13];
+
+    match i2c.blocking_write_read(0x70, &[0xa8], &mut data) {
+        Ok(()) => info!("Whoami: {:#?}", data),
+        Err(embassy_stm32::i2c::Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+
+    let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(i2c, 0x70, embedded_dal::drivers::ft6x36::Dimension(LCD_Y_Size, LCD_X_Size));
+    
+
+    touch_screen.init().unwrap();
+
+    match touch_screen.get_info() {
+        Some(info) => info!("Got touch screen info."),
+        None => warn!("No info"),
+    }
+
+    // END TOUCHSCREEN
+
+    let mut led = Output::new(p.PG6, Level::High, Speed::Low);
+
 
     /*
     BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
@@ -565,7 +623,7 @@ fn main() -> ! {
     ######################################
     */
 
-    let mut write_closure = |address: u8, data: &[u8]| { dsi.write_cmd(0, address, data).unwrap() };
+    let mut write_closure = |address: u8, data: &[u8]| dsi.write_cmd(0, address, data).unwrap();
     embedded_dal::drivers::nt35510::init(&mut write_closure, embassy_time::Delay);
 
     /*
@@ -576,9 +634,9 @@ fn main() -> ! {
 
     /* Initialize the LCD pixel width and pixel height */
     const WindowX0: u16 = 100;
-    const WindowX1: u16 = 100+60;//LCD_X_Size; // 60 for camera
+    const WindowX1: u16 = 100 + 60; //LCD_X_Size; // 60 for camera
     const WindowY0: u16 = 100;
-    const WindowY1: u16 = 100+60;//LCD_Y_Size; // 60 for camera
+    const WindowY1: u16 = 100 + 60; //LCD_Y_Size; // 60 for camera
     const PixelFormat: Pf = Pf::ARGB8888;
     //const FBStartAdress: u16 = FB_Address;
     const Alpha: u8 = 255;
@@ -586,8 +644,8 @@ fn main() -> ! {
     const BackcolorBlue: u8 = 0;
     const BackcolorGreen: u8 = 0;
     const BackcolorRed: u8 = 0;
-    const ImageWidth: u16 = 60;//LCD_X_Size; // 60 for camera
-    const ImageHeight: u16 = 60;//LCD_Y_Size; // 60 for camera
+    const ImageWidth: u16 = 60; //LCD_X_Size; // 60 for camera
+    const ImageHeight: u16 = 60; //LCD_Y_Size; // 60 for camera
 
     /*:
     ######################################
