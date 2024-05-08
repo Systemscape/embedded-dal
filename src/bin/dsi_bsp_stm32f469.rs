@@ -565,75 +565,8 @@ fn main() -> ! {
     ######################################
     */
 
-    // First, delay 120 ms (reason unknown, STM32 Cube Example does it)
-    blocking_delay_ms(120);
-
-    // 1 to 26
-    dsi.write_cmd(0, NT35510_WRITES_0).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_1).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_2).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_3).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_4).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_5).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_6).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_7).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_8).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_9).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_10).unwrap();
-    // 11 missing
-    dsi.write_cmd(0, NT35510_WRITES_12).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_13).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_14).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_15).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_16).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_17).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_18).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_19).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_20).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_21).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_22).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_23).unwrap();
-    dsi.write_cmd(0, NT35510_WRITES_24).unwrap();
-
-    // Tear on
-    dsi.write_cmd(0, NT35510_WRITES_26).unwrap();
-
-    // Set Pixel color format to RGB888
-    dsi.write_cmd(0, NT35510_WRITES_37).unwrap();
-
-    // Add a delay, otherwise MADCTL not taken
-    blocking_delay_ms(200);
-
-    // Configure orientation as landscape
-    dsi.write_cmd(0, NT35510_MADCTL_LANDSCAPE).unwrap();
-    dsi.write_cmd(0, NT35510_CASET_LANDSCAPE).unwrap();
-    dsi.write_cmd(0, NT35510_RASET_LANDSCAPE).unwrap();
-
-    // Sleep out
-    dsi.write_cmd(0, NT35510_WRITES_27).unwrap();
-
-    // Wait for sleep out exit
-    blocking_delay_ms(120);
-
-    // Configure ColorCoding
-    dsi.write_cmd(0, NT35510_WRITES_37).unwrap();
-
-    /* CABC : Content Adaptive Backlight Control section start >> */
-    /* Note : defaut is 0 (lowest Brightness), 0xFF is highest Brightness, try 0x7F : intermediate value */
-    dsi.write_cmd(0, NT35510_WRITES_31).unwrap();
-    /* defaut is 0, try 0x2C - Brightness Control Block, Display Dimming & BackLight on */
-    dsi.write_cmd(0, NT35510_WRITES_32).unwrap();
-    /* defaut is 0, try 0x02 - image Content based Adaptive Brightness [Still Picture] */
-    dsi.write_cmd(0, NT35510_WRITES_33).unwrap();
-    /* defaut is 0 (lowest Brightness), 0xFF is highest Brightness */
-    dsi.write_cmd(0, NT35510_WRITES_34).unwrap();
-    /* CABC : Content Adaptive Backlight Control section end << */
-    /* Display on */
-    dsi.write_cmd(0, NT35510_WRITES_30).unwrap();
-
-    /* Send Command GRAM memory write (no parameters) : this initiates frame write via other DSI commands sent by */
-    /* DSI host from LTDC incoming pixels in video mode */
-    dsi.write_cmd(0, NT35510_WRITES_35).unwrap();
+    let mut write_closure = |address: u8, data: &[u8]| { dsi.write_cmd(0, address, data).unwrap() };
+    embedded_dal::drivers::nt35510::init(&mut write_closure, embassy_time::Delay);
 
     /*
     ######################################
@@ -735,6 +668,8 @@ fn main() -> ! {
 
     blocking_delay_ms(5000);
 
+    /*/
+
     const READ_SIZE: u16 = 1;
     let mut data = [1u8; READ_SIZE as usize];
     dsi.read(0, PacketType::DcsShortPktRead(0xDA), READ_SIZE, &mut data)
@@ -751,13 +686,16 @@ fn main() -> ! {
 
     blocking_delay_ms(500);
 
+    */
+
     info!("Config done, start blinking LED");
     loop {
         led.set_high();
         embassy_time::block_for(embassy_time::Duration::from_millis(2000));
 
         // Increase screen brightness
-        dsi.write_cmd(0, &[NT35510_CMD_WRDISBV, 0xFF]).unwrap();
+        embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0xFF);
+        //dsi.write_cmd(0, NT35510_CMD_WRDISBV, &[0xFF]).unwrap();
 
         //dsi.write_cmd(0, &[NT35510_CMD_ALLPIXELS_ON, 0xFF]);
 
@@ -765,7 +703,8 @@ fn main() -> ! {
         embassy_time::block_for(embassy_time::Duration::from_millis(2000));
 
         // Reduce screen brightness
-        dsi.write_cmd(0, &[NT35510_CMD_WRDISBV, 0x50]).unwrap();
+        //dsi.write_cmd(0, NT35510_CMD_WRDISBV, &[0x50]).unwrap();
+        embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0x30);
 
         //dsi.write_cmd(0, &[NT35510_CMD_ALLPIXELS_OFF, 0xFF]);
     }

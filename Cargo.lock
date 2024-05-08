@@ -155,7 +155,7 @@ dependencies = [
 [[package]]
 name = "embassy-embedded-hal"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "defmt",
  "embassy-futures",
@@ -172,12 +172,12 @@ dependencies = [
 [[package]]
 name = "embassy-futures"
 version = "0.1.1"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 
 [[package]]
 name = "embassy-hal-internal"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "cortex-m",
  "critical-section",
@@ -188,7 +188,7 @@ dependencies = [
 [[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "defmt",
 ]
@@ -196,7 +196,7 @@ dependencies = [
 [[package]]
 name = "embassy-stm32"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "bit_field",
  "bitflags 2.5.0",
@@ -240,7 +240,7 @@ dependencies = [
 [[package]]
 name = "embassy-sync"
 version = "0.5.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -253,7 +253,7 @@ dependencies = [
 [[package]]
 name = "embassy-time"
 version = "0.3.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -271,7 +271,7 @@ dependencies = [
 [[package]]
 name = "embassy-time-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "document-features",
 ]
@@ -279,12 +279,12 @@ dependencies = [
 [[package]]
 name = "embassy-time-queue-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 
 [[package]]
 name = "embassy-usb-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303#d5f8161fc0d842a1c84a2c7af3ca2a4b54e7a303"
+source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
 dependencies = [
  "defmt",
 ]
@@ -308,6 +308,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-stm32",
  "embassy-time",
+ "embedded-hal 1.0.0",
  "panic-probe",
 ]
 
