@@ -415,9 +415,9 @@ where
     /// - [Ft6x36 driver](Ft6x36) created
     ///
     #[cfg(feature = "event_process")]
-    pub fn new_with_config(i2c: I2C, size: Dimension, config: ProcessEventConfig) -> Self {
+    pub fn new_with_config(i2c: I2C, address: u8, size: Dimension, config: ProcessEventConfig) -> Self {
         Self {
-            address: DEFAULT_FT6X36_ADDRESS,
+            address,
             i2c,
             info: None,
             events: (None, None),

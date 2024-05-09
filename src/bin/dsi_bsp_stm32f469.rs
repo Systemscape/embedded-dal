@@ -3,8 +3,8 @@
 
 use embassy_time::Duration;
 use embedded_dal::drivers::nt35510::*;
-//use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
-use embedded_dal::test_images::systemscape::FRAMEBUFFER;
+
+use embassy_executor::Spawner;
 
 use defmt::*;
 use embassy_stm32::{
@@ -34,8 +34,8 @@ const LCD_Orientation: Orientation = Orientation::Landscape;
 const LCD_X_Size: u16 = 800;
 const LCD_Y_Size: u16 = 480;
 
-#[cortex_m_rt::entry]
-fn main() -> ! {
+#[embassy_executor::main]
+async fn main(_spawner: Spawner) {
     /*
         SystemClock_Config()
     */
@@ -92,11 +92,13 @@ fn main() -> ! {
     // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
     //embassy_time::block_for(embassy_time::Duration::from_millis(160));
 
-    //let mut ts_int = Input::new(p.PJ5, Pull::None);
-
-    let mut i2c =
-        embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), Default::default());
-
+    let mut i2c = embassy_stm32::i2c::I2c::new_blocking(
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        Hertz(400_000),
+        Default::default(),
+    );
 
     let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
         i2c,
@@ -601,20 +603,41 @@ fn main() -> ! {
     ######################################
     */
 
+    use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
+
+
     /* Initialize the LCD pixel width and pixel height */
-    const WindowX0: u16 = 0;//100;
-    const WindowX1: u16 = LCD_X_Size;//100 + 60; // // 60 for camera
-    const WindowY0: u16 = 0;//100;
-    const WindowY1: u16 = LCD_Y_Size;//100 + 60; //LCD_Y_Size; // 60 for camera
+    const WindowX0: u16 = 200; //100;
+    const WindowX1: u16 = 260; //100 + 60; // // 60 for camera
+    const WindowY0: u16 = 200; //100;
+    const WindowY1: u16 = 260; //100 + 60; //LCD_Y_Size; // 60 for camera
     const PixelFormat: Pf = Pf::ARGB8888;
-    //const FBStartAdress: u16 = FB_Address;
     const Alpha: u8 = 255;
     const Alpha0: u8 = 0;
     const BackcolorBlue: u8 = 0;
     const BackcolorGreen: u8 = 0;
     const BackcolorRed: u8 = 0;
-    const ImageWidth: u16 = LCD_X_Size;//60; //LCD_X_Size; // 60 for camera
-    const ImageHeight: u16 = LCD_Y_Size;//60; //LCD_Y_Size; // 60 for camera
+    const ImageWidth: u16 = 60; //LCD_X_Size; // 60 for camera
+    const ImageHeight: u16 = 60; //LCD_Y_Size; // 60 for camera
+
+
+    /*
+    use embedded_dal::test_images::systemscape::FRAMEBUFFER;
+
+    /* Initialize the LCD pixel width and pixel height */
+    const WindowX0: u16 = 0; //100;
+    const WindowX1: u16 = LCD_X_Size; //100 + 60; // // 60 for camera
+    const WindowY0: u16 = 0; //100;
+    const WindowY1: u16 = LCD_Y_Size; //100 + 60; //LCD_Y_Size; // 60 for camera
+    const PixelFormat: Pf = Pf::ARGB8888;
+    const Alpha: u8 = 255;
+    const Alpha0: u8 = 0;
+    const BackcolorBlue: u8 = 0;
+    const BackcolorGreen: u8 = 0;
+    const BackcolorRed: u8 = 0;
+    const ImageWidth: u16 = LCD_X_Size; //60; //LCD_X_Size; // 60 for camera
+    const ImageHeight: u16 = LCD_Y_Size; //60; //LCD_Y_Size; // 60 for camera
+    */
 
     /*:
     ######################################
@@ -715,16 +738,28 @@ fn main() -> ! {
 
     */
 
+        //let mut ts_int = Input::new(p.PJ5, Pull::None);
+    let mut exti_pin = embassy_stm32::exti::ExtiInput::new(p.PJ5, p.EXTI5, Pull::None);
     loop {
-        let event = touch_screen.get_touch_event().unwrap();
-        info!("Got event: {:#?}", event);
+        let time = embassy_time::Instant::now().duration_since(embassy_time::Instant::from_ticks(0));
+        exti_pin.wait_for_falling_edge().await;
+        let event = touch_screen
+            .get_touch_event()
+            .ok()
+            .and_then(|touch_event| touch_screen.process_event(time.into(), touch_event));
+        if let Some(event) = event {
+            info!("Got event: {:#?}", event);
+        } 
+        //embassy_time::block_for(embassy_time::Duration::from_millis(10));
 
+        /*
         if let Some(_) = event.p1 {
             embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0xFF);
         } else {
             embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, 0x20);
         }
         embassy_time::block_for(Duration::from_millis(100));
+        */
     }
 
     info!("Config done, start blinking LED");
