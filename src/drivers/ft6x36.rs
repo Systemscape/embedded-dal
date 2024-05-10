@@ -1,6 +1,10 @@
+/// FT6x36 driver based on the [ft6x36-rs](https://github.com/pyaillet/ft6x36-rs/tree/main) project.
+///
+/// Gesture recognition apparently requires some custom firmware for the chip that is usually not present. So this is not implemented attempts from the original
 use embedded_hal::i2c::{ErrorType, I2c, SevenBitAddress};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
+use core::cmp::max;
 #[cfg(feature = "event_process")]
 use core::time::Duration;
 
@@ -9,13 +13,13 @@ use serde::{Deserialize, Serialize};
 
 const REPORT_SIZE: usize = 0x0f;
 
-#[cfg(feature = "event_process")]
-const MAX_DELTA_TOUCH_EVENT: Duration = Duration::from_millis(200);
-
 /// Represents the dimensions of the device
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Copy, Clone)]
-pub struct Dimension(pub u16, pub u16);
+pub struct Dimension {
+    pub x: u16,
+    pub y: u16,
+}
 
 /// Driver representation holding:
 ///
@@ -58,6 +62,7 @@ pub struct ProcessEventConfig {
     gesture_timing: Duration,
     max_swipe_delta: u16,
     min_swipe_delta: u16,
+    max_delta_touch_event: Duration,
 }
 
 #[cfg(feature = "event_process")]
@@ -67,6 +72,7 @@ impl Default for ProcessEventConfig {
             gesture_timing: Duration::from_millis(800),
             max_swipe_delta: 30,
             min_swipe_delta: 30,
+            max_delta_touch_event: Duration::from_millis(500),
         }
     }
 }
@@ -102,21 +108,12 @@ pub struct TouchPoint {
 
 impl TouchPoint {
     fn translate_coordinates(self, size: Dimension, orientation: Orientation) -> Self {
-        fn difference_or_zero(o1: u16, o2: u16) -> u16 {
-            if o2 > o1 {
-                0
-            } else {
-                o1 - o2
-            }
-        }
         let TouchPoint { touch_type, x, y } = self;
         let (x, y) = match orientation {
             Orientation::Portrait => (x, y),
-            Orientation::InvertedPortrait => {
-                (difference_or_zero(size.0, x), difference_or_zero(size.1, y))
-            }
-            Orientation::Landscape => (y, difference_or_zero(size.0, x)),
-            Orientation::InvertedLandscape => (difference_or_zero(size.1, y), x),
+            Orientation::InvertedPortrait => (max(size.x - x, 0), max(size.y - y, 0)),
+            Orientation::Landscape => (y, max(size.x - x, 0)),
+            Orientation::InvertedLandscape => (max(size.y - y, 0), x),
         };
         TouchPoint { x, y, touch_type }
     }
@@ -124,9 +121,9 @@ impl TouchPoint {
 
 impl From<&[u8]> for TouchPoint {
     fn from(data: &[u8]) -> Self {
-        let x: u16 = ((data[0] as u16 & 0x0f) << 8) | (data[1] as u16);
-        let y: u16 = ((data[2] as u16 & 0x0f) << 8) | (data[3] as u16);
-        let touch_type: TouchType = data[0].into();
+        let x = u16::from_be_bytes([data[0] & 0x0f, data[1]]);
+        let y = u16::from_be_bytes([data[2] & 0x0f, data[3]]);
+        let touch_type: TouchType = data[0].into(); // the first two bit of each coordinate contain the type
 
         Self { touch_type, x, y }
     }
@@ -168,7 +165,6 @@ pub enum TouchEvent {
     Zoom(Zoom),
 }
 
-/// Device mode
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
@@ -209,7 +205,6 @@ impl From<u8> for TouchType {
 #[allow(dead_code)]
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct RawTouchEvent {
-    /// Device mode
     pub device_mode: DeviceMode,
     pub gesture_id: GestureId,
     pub p1: Option<TouchPoint>,
@@ -328,7 +323,7 @@ enum Reg {
     OperatingMode = 0xBC,
 }
 
-/// Known and detected gestures (currently not working though)
+/// Known and detected gestures (might not work depending on your touchscreen's firmware)
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
@@ -344,7 +339,7 @@ pub enum GestureId {
     ZoomOut = 0x49,
 }
 
-/// Enum describing known chips
+/// Mapping of models and their Chip IDs
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(u8)]
@@ -363,13 +358,9 @@ pub enum ChipId {
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct Ft6x36Info {
-    /// ChipId, known chips are: Ft6206, Ft6236 and Ft6236u
     chip_id: ChipId,
-    /// Firmware Id
     firmware_id: u8,
-    /// Panel id
     panel_id: u8,
-    /// Version of the release code
     release_code: u8,
 }
 
@@ -377,12 +368,13 @@ impl<I2C> Ft6x36<I2C>
 where
     I2C: I2c<SevenBitAddress>,
 {
-    /// Create a new Ft6x36 device with the default slave address
+    /// Create a new Ft6x36 device with the given slave address
     ///
     /// # Arguments
     ///
     /// - `i2c` I2C bus used to communicate with the device
-    /// - `size` [`Dimension`] of the device
+    /// - `address` I2C address of the touch screen, usually 0x38.
+    /// - `size` [`Dimension`]s of the device
     ///
     /// # Returns
     ///
@@ -402,11 +394,12 @@ where
         }
     }
 
-    /// Create a new Ft6x36 device with the default slave address
+    /// Create a new Ft6x36 device with the given slave address
     ///
     /// # Arguments
     ///
     /// - `i2c` I2C bus used to communicate with the device
+    /// - `address` I2C address of the touch screen, usually 0x38.
     /// - `size` [`Dimension`] of the device
     /// - `config`- [`ProcessEventConfig`] for the event processor
     ///
@@ -415,7 +408,12 @@ where
     /// - [Ft6x36 driver](Ft6x36) created
     ///
     #[cfg(feature = "event_process")]
-    pub fn new_with_config(i2c: I2C, address: u8, size: Dimension, config: ProcessEventConfig) -> Self {
+    pub fn new_with_config(
+        i2c: I2C,
+        address: u8,
+        size: Dimension,
+        config: ProcessEventConfig,
+    ) -> Self {
         Self {
             address,
             i2c,
@@ -429,8 +427,9 @@ where
 
     /// Initialize the device
     ///
-    /// Currently it only gathers information on the device and initializes the
-    /// [info structure of the driver](Ft6x36Info)
+    /// - gathers information on the device
+    /// - initializes the [info structure of the driver](Ft6x36Info)
+    /// - sets the control mode to active mode
     ///
     pub fn init(&mut self) -> Result<(), <I2C as ErrorType>::Error> {
         let mut buf: [u8; 13] = [0; 13];
@@ -450,20 +449,12 @@ where
         Ok(())
     }
 
-    /// Change orientation for the device
-    ///
-    /// # Arguments
-    ///
-    /// - `orientation` - set the new [`Orientation`]
+    /// Set a new device orientation
     pub fn set_orientation(&mut self, orientation: Orientation) {
         self.orientation = orientation;
     }
 
     /// Get the full raw report of touch events
-    ///
-    /// # Returns
-    ///
-    /// - [`TouchEvent`] the full TouchEvent report
     pub fn get_touch_event(&mut self) -> Result<RawTouchEvent, <I2C as ErrorType>::Error> {
         let mut report: [u8; REPORT_SIZE] = [0; REPORT_SIZE];
         self.i2c
@@ -474,7 +465,9 @@ where
     }
 
     /// Get the current gesture detection parameters
-    /// (Currently not working)
+    ///
+    /// **Note:** This requires your touch screen firmware to provide this functionality.
+    /// This is often not the case.
     pub fn get_gesture_params(&mut self) -> Result<GestureParams, <I2C as ErrorType>::Error> {
         let mut buf: [u8; 6] = [0; 6];
 
@@ -490,21 +483,13 @@ where
         })
     }
 
-    /// Set the touch detection threshold
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the threshold value
+    /// Set the threshold for touch detection
     pub fn set_touch_threshold(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::TouchDetectionThreshold.into(), value])
     }
 
-    /// Set the touch filter coefficient
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the touch filter coefficient
+    /// Set the "filter function coefficient"
     pub fn set_touch_filter_coefficient(
         &mut self,
         value: u8,
@@ -518,51 +503,30 @@ where
     /// - 0: Will keep the Active mode when there is no touching
     /// - 1: Switching from Active mode to Monitor mode automatically when there
     ///   is no touching and the TimeActiveMonitor period is elapsed
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the control mode
     pub fn set_control_mode(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::ControlMode.into(), value])
     }
 
-    /// Set the period used to switch from Active to Monitor mode
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the switching period
-    pub fn set_time_active_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    /// Set the time period of switching from Active mode to Monitor mode when there is no touching.
+    pub fn set_time_enter_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::TimeActiveMonitor.into(), value])
     }
 
     /// Set the report rate in Active mode
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the report rate in Active mode
     pub fn set_period_active(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::PeriodActive.into(), value])
     }
 
     /// Set the report rate in Monitor mode
-    ///
-    /// # Arguments
-    ///
-    /// - `value` the report rate in Monitor mode
     pub fn set_period_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::PeriodMonitor.into(), value])
     }
 
-    /// Set the minimum angle for gesture detection
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the minimum allowed angle while rotating gesture
-    ///   mode
+    /// Set the minimum angle for gesture detection (in rotating gesture mode)
     pub fn set_gesture_minimum_angle(
         &mut self,
         value: u8,
@@ -572,11 +536,6 @@ where
     }
 
     /// Set the maximum offset for detecting Moving left and Moving right gestures
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the maximum offset for detecting Moving left and Moving right gestures
-    ///   mode
     pub fn set_gesture_offset_left_right(
         &mut self,
         value: u8,
@@ -586,11 +545,6 @@ where
     }
 
     /// Set the maximum offset for detecting Moving up and Moving down gestures
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the maximum offset for detecting Moving up and Moving down gestures
-    ///   mode
     pub fn set_gesture_offset_up_down(
         &mut self,
         value: u8,
@@ -600,11 +554,6 @@ where
     }
 
     /// Set the minimum distance for detecting Moving up and Moving down gestures
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the minimum distance for detecting Moving up and Moving down gestures
-    ///   mode
     pub fn set_gesture_distance_up_down(
         &mut self,
         value: u8,
@@ -614,11 +563,6 @@ where
     }
 
     /// Set the minimum distance for detecting Moving left and Moving right gestures
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the minimum distance for detecting Moving left and Moving right
-    ///   gestures mode
     pub fn set_gesture_distance_left_right(
         &mut self,
         value: u8,
@@ -628,10 +572,6 @@ where
     }
 
     /// Set the minimum distance for detecting zoom gestures
-    ///
-    /// # Arguments
-    ///
-    /// - `value` The value of the minimum distance for detecting zoom gestures mode
     pub fn set_gesture_distance_zoom(
         &mut self,
         value: u8,
@@ -642,19 +582,12 @@ where
 
     /// Get device information
     ///
-    /// # Returns
-    ///
-    /// - `None` if the device is not initialized
-    /// - [`Some(Ft6x36Info)`](Ft6x36Info) otherwise
+    /// Returns `None` if the device is not initialized.
     pub fn get_info(&self) -> Option<Ft6x36Info> {
         self.info
     }
 
     /// Get device Diagnostics
-    ///
-    /// # Returns
-    ///
-    /// -
     pub fn get_diagnostics(&mut self) -> Result<Diagnostics, <I2C as ErrorType>::Error> {
         let mut buf: [u8; 1] = [0];
         self.i2c
@@ -723,7 +656,7 @@ where
                         let old_evt1 = old_evt1.event;
                         if old_evt1.p2.is_none()
                             || event.p2.is_some()
-                            || (time - time_evt1) > MAX_DELTA_TOUCH_EVENT
+                            || (time - time_evt1) > self.config.max_delta_touch_event
                         {
                             self.events.1 = Some(TimedRawTouchEvent { time, event })
                         }

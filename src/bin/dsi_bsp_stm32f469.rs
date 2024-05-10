@@ -103,15 +103,22 @@ async fn main(_spawner: Spawner) {
     let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
         i2c,
         0x38,
-        embedded_dal::drivers::ft6x36::Dimension(LCD_Y_Size, LCD_X_Size),
+        embedded_dal::drivers::ft6x36::Dimension {
+            x: LCD_Y_Size,
+            y: LCD_X_Size,
+        },
     );
 
     touch_screen.init().unwrap();
+    touch_screen.set_orientation(embedded_dal::drivers::ft6x36::Orientation::Landscape);
 
     match touch_screen.get_info() {
         Some(info) => info!("Got touch screen info: {:#?}", info),
         None => warn!("No info"),
     }
+
+    let diag = touch_screen.get_diagnostics().unwrap();
+    info!("Got touch screen diag: {:#?}", diag);
 
     // END TOUCHSCREEN
 
@@ -605,7 +612,6 @@ async fn main(_spawner: Spawner) {
 
     use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
 
-
     /* Initialize the LCD pixel width and pixel height */
     const WindowX0: u16 = 200; //100;
     const WindowX1: u16 = 260; //100 + 60; // // 60 for camera
@@ -619,7 +625,6 @@ async fn main(_spawner: Spawner) {
     const BackcolorRed: u8 = 0;
     const ImageWidth: u16 = 60; //LCD_X_Size; // 60 for camera
     const ImageHeight: u16 = 60; //LCD_Y_Size; // 60 for camera
-
 
     /*
     use embedded_dal::test_images::systemscape::FRAMEBUFFER;
@@ -738,18 +743,18 @@ async fn main(_spawner: Spawner) {
 
     */
 
-        //let mut ts_int = Input::new(p.PJ5, Pull::None);
     let mut exti_pin = embassy_stm32::exti::ExtiInput::new(p.PJ5, p.EXTI5, Pull::None);
     loop {
-        let time = embassy_time::Instant::now().duration_since(embassy_time::Instant::from_ticks(0));
-        exti_pin.wait_for_falling_edge().await;
+        let time =
+            embassy_time::Instant::now().duration_since(embassy_time::Instant::from_ticks(0));
+        exti_pin.wait_for_low().await;
         let event = touch_screen
             .get_touch_event()
             .ok()
             .and_then(|touch_event| touch_screen.process_event(time.into(), touch_event));
         if let Some(event) = event {
             info!("Got event: {:#?}", event);
-        } 
+        }
         //embassy_time::block_for(embassy_time::Duration::from_millis(10));
 
         /*
