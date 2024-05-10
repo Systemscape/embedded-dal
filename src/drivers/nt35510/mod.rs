@@ -1,6 +1,7 @@
-// TODO: - Add Orientation
+use crate::config::Orientation::{self, *};
+use embedded_hal::delay::DelayNs;
 
-pub fn init(mut write: impl FnMut(u8, &[u8]), mut delay: impl embedded_hal::delay::DelayNs) {
+pub fn init(mut write: impl FnMut(u8, &[u8]), mut delay: impl DelayNs, orientation: Orientation) {
     write(0xF0, &[0x55, 0xAA, 0x52, 0x08, 0x01]); // LV2:  Page 1 enable
     write(0xB0, &[0x03, 0x03, 0x03]); // AVDD: 5.2V
     write(0xB6, &[0x46, 0x46, 0x46]); // AVDD: Ratio
@@ -37,9 +38,18 @@ pub fn init(mut write: impl FnMut(u8, &[u8]), mut delay: impl embedded_hal::dela
     delay.delay_ms(200);
 
     // Configure orientation as landscape
-    write(NT35510_CMD_MADCTL, &[0x60]);
-    write(NT35510_CMD_CASET, &[0x00, 0x00, 0x03, 0x1F]);
-    write(NT35510_CMD_RASET, &[0x00, 0x00, 0x01, 0xDF]);
+    match orientation {
+        Landscape => {
+            write(NT35510_CMD_MADCTL, &[0x60]);
+            write(NT35510_CMD_CASET, &[0x00, 0x00, 0x03, 0x1F]);
+            write(NT35510_CMD_RASET, &[0x00, 0x00, 0x01, 0xDF]);
+        }
+        Portrait => {
+            write(NT35510_CMD_MADCTL, &[0x00]);
+            write(NT35510_CMD_CASET, &[0x00, 0x00, 0x01, 0xDF]);
+            write(NT35510_CMD_RASET, &[0x00, 0x00, 0x03, 0x1F]);
+        }
+    }
 
     // Sleep out
     write(NT35510_CMD_SLPOUT, &[0x00]);

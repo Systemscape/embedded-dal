@@ -2,6 +2,7 @@
 #![no_main]
 
 use embassy_time::Duration;
+use embedded_dal::config::{Dimensions, Orientation};
 use embedded_dal::drivers::{dsi, ft6x36::TouchEvent, ltdc, nt35510::*};
 
 use embassy_executor::Spawner;
@@ -25,14 +26,8 @@ use embassy_stm32::{
 
 use {defmt_rtt as _, panic_probe as _};
 
-enum Orientation {
-    Landscape,
-    Portrait,
-}
-
-const LCD_Orientation: Orientation = Orientation::Landscape;
-const LCD_X_Size: u16 = 800;
-const LCD_Y_Size: u16 = 480;
+const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Portrait;
+const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
 
 /* 500 MHz / 8 = 62.5 MHz = 62500 kHz */
 const LaneByteClk_kHz: u16 = 62500; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L224C21-L224C26
@@ -112,13 +107,16 @@ async fn main(_spawner: Spawner) {
         i2c,
         0x38,
         embedded_dal::drivers::ft6x36::Dimension {
-            x: LCD_Y_Size,
-            y: LCD_X_Size,
+            x: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
+            y: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
         },
     );
 
     touch_screen.init().unwrap();
-    touch_screen.set_orientation(embedded_dal::drivers::ft6x36::Orientation::Landscape);
+    touch_screen.set_orientation(match LCD_ORIENTATION {
+        Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
+        Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
+    });
 
     match touch_screen.get_info() {
         Some(info) => info!("Got touch screen info: {:#?}", info),
@@ -254,12 +252,13 @@ async fn main(_spawner: Spawner) {
     const DSI_PIXELFORMAT_RGB888: u8 = 0x05;
     const DSI_PIXELFORMAT_ARGB888: u8 = 0x00;
 
-    const HACT: u16 = LCD_X_Size;
-    const VACT: u16 = LCD_Y_Size;
+    const HACT: u16 = LCD_DIMENSIONS.get_width(LCD_ORIENTATION);
+    const VACT: u16 = LCD_DIMENSIONS.get_height(LCD_ORIENTATION);;
 
     const VSA: u16 = 120;
     const VBP: u16 = 150;
     const VFP: u16 = 150;
+
     const HSA: u16 = 2;
     const HBP: u16 = 34;
     const HFP: u16 = 34;
@@ -273,7 +272,7 @@ async fn main(_spawner: Spawner) {
     const Mode: u8 = 2; // DSI_VID_MODE_BURST; /* Mode Video burst ie : one LgP per line */
     const NullPacketSize: u16 = 0xFFF;
     const NumberOfChunks: u16 = 0;
-    const PacketSize: u16 = HACT; /* Value depending on display orientation choice portrait/landscape */
+    const PacketSize: u16 = HACT;
     const LPCommandEnable: bool = true; /* Enable sending commands in mode LP (Low Power) */
 
     /* Largest packet size possible to transmit in LP mode in VSA, VBP, VFP regions */
@@ -360,6 +359,7 @@ async fn main(_spawner: Spawner) {
     DSIHOST.vlcr().modify(|w| {
         w.set_hline(dsi::to_clock_cycles(
             HACT + HSA + HBP + HFP,
+            //VACT + VSA + VBP + VFP,
             LaneByteClk_kHz,
             LcdClock,
         ))
@@ -514,10 +514,10 @@ async fn main(_spawner: Spawner) {
     const VerticalSync: u16 = VSA - 1;
     const AccumulatedHBP: u16 = HSA + HBP - 1;
     const AccumulatedVBP: u16 = VSA + VBP - 1;
-    const AccumulatedActiveW: u16 = LCD_X_Size + HSA + HBP - 1;
-    const AccumulatedActiveH: u16 = VSA + VBP + VACT - 1;
-    const TotalWidth: u16 = LCD_X_Size + HSA + HBP + HFP - 1;
-    const TotalHeight: u16 = VSA + VBP + VACT + VFP - 1;
+    const AccumulatedActiveW: u16 = LCD_DIMENSIONS.get_width(LCD_ORIENTATION) + HSA + HBP - 1;
+    const AccumulatedActiveH: u16 = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) + VSA + VBP - 1;
+    const TotalWidth: u16 = LCD_DIMENSIONS.get_width(LCD_ORIENTATION) + HSA + HBP + HFP - 1;
+    const TotalHeight: u16 = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) + VSA + VBP + VFP - 1;
 
     /*
     ######################################
@@ -605,7 +605,7 @@ async fn main(_spawner: Spawner) {
 
     // FIXME: This should probably be done with a trait or so...
     let mut write_closure = |address: u8, data: &[u8]| dsi.write_cmd(0, address, data).unwrap();
-    embedded_dal::drivers::nt35510::init(&mut write_closure, embassy_time::Delay);
+    embedded_dal::drivers::nt35510::init(&mut write_closure, embassy_time::Delay, LCD_ORIENTATION);
 
     /*
     ######################################
