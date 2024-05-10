@@ -2,18 +2,18 @@
 #![no_main]
 
 use embassy_time::Duration;
-use embedded_dal::drivers::nt35510::*;
+use embedded_dal::drivers::{dsi, ft6x36::TouchEvent, ltdc, nt35510::*};
 
 use embassy_executor::Spawner;
 
 use defmt::*;
 use embassy_stm32::{
-    dsihost::{blocking_delay_ms, DsiHost, PacketType},
-    gpio::{Input, Level, Output, Pull, Speed},
+    dsihost::{blocking_delay_ms, DsiHost},
+    gpio::{Level, Output, Pull, Speed},
     ltdc::Ltdc,
     pac::{
         dsihost::regs::{Ier0, Ier1},
-        ltdc::vals::{Bf1, Bf2, Depol, Hspol, Imr, Pcpol, Pf, Vspol},
+        ltdc::vals::{Depol, Hspol, Pcpol, Pf, Vspol},
         DSIHOST, LTDC,
     },
     rcc::{
@@ -33,6 +33,14 @@ enum Orientation {
 const LCD_Orientation: Orientation = Orientation::Landscape;
 const LCD_X_Size: u16 = 800;
 const LCD_Y_Size: u16 = 480;
+
+/* 500 MHz / 8 = 62.5 MHz = 62500 kHz */
+const LaneByteClk_kHz: u16 = 62500; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L224C21-L224C26
+
+const LcdClock: u16 = 27429; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L183
+
+/* TXEscapeCkdiv = f(LaneByteClk)/15.62 = 4 */
+const TXEscapeCkdiv: u8 = (LaneByteClk_kHz / 15620) as u8; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L230
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -130,6 +138,7 @@ async fn main(_spawner: Spawner) {
 
     let mut ltdc = Ltdc::new(p.LTDC);
     let mut dsi = DsiHost::new(p.DSIHOST, p.PJ2);
+
     let version = dsi.get_version();
     defmt::warn!("DSI IP Version: {:x}", version);
 
@@ -186,14 +195,6 @@ async fn main(_spawner: Spawner) {
         w.set_idf(2); // PLL input divided by 2
         w.set_odf(0); // PLL output divided by 1
     });
-
-    /* 500 MHz / 8 = 62.5 MHz = 62500 kHz */
-    const LaneByteClk_kHz: u16 = 62500; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L224C21-L224C26
-
-    const LcdClock: u16 = 27429; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L183
-
-    /* TXEscapeCkdiv = f(LaneByteClk)/15.62 = 4 */
-    const TXEscapeCkdiv: u8 = (LaneByteClk_kHz / 15620) as u8; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L230
 
     for _ in 1..1000 {
         embassy_time::block_for(embassy_time::Duration::from_millis(1));
@@ -273,14 +274,6 @@ async fn main(_spawner: Spawner) {
     const NullPacketSize: u16 = 0xFFF;
     const NumberOfChunks: u16 = 0;
     const PacketSize: u16 = HACT; /* Value depending on display orientation choice portrait/landscape */
-    const HorizontalSyncActive: u16 = 4; // ((HSA as u32 * LaneByteClk_kHz as u32 ) / LcdClock as u32 ) as u16;
-    const HorizontalBackPorch: u16 = 77; //((HBP as u32  * LaneByteClk_kHz as u32 ) / LcdClock as u32) as u16;
-    const HorizontalLine: u16 = 1982; //(((HACT + HSA + HBP + HFP) as u32  * LaneByteClk_kHz as u32 ) / LcdClock as u32 ) as u16; /* Value depending on display orientation choice portrait/landscape */
-                                      // FIXME: Make depend on orientation
-    const VerticalSyncActive: u16 = VSA;
-    const VerticalBackPorch: u16 = VBP;
-    const VerticalFrontPorch: u16 = VFP;
-    const VerticalActive: u16 = VACT;
     const LPCommandEnable: bool = true; /* Enable sending commands in mode LP (Low Power) */
 
     /* Largest packet size possible to transmit in LP mode in VSA, VBP, VFP regions */
@@ -354,25 +347,35 @@ async fn main(_spawner: Spawner) {
     */
 
     /* Set the Horizontal Synchronization Active (HSA) in lane byte clock cycles */
-    DSIHOST.vhsacr().modify(|w| w.set_hsa(HorizontalSyncActive));
+    DSIHOST
+        .vhsacr()
+        .modify(|w| w.set_hsa(dsi::to_clock_cycles(HSA, LaneByteClk_kHz, LcdClock)));
 
     /* Set the Horizontal Back Porch (HBP) in lane byte clock cycles */
-    DSIHOST.vhbpcr().modify(|w| w.set_hbp(HorizontalBackPorch));
+    DSIHOST
+        .vhbpcr()
+        .modify(|w| w.set_hbp(dsi::to_clock_cycles(HBP, LaneByteClk_kHz, LcdClock)));
 
     /* Set the total line time (HLINE=HSA+HBP+HACT+HFP) in lane byte clock cycles */
-    DSIHOST.vlcr().modify(|w| w.set_hline(HorizontalLine));
+    DSIHOST.vlcr().modify(|w| {
+        w.set_hline(dsi::to_clock_cycles(
+            HACT + HSA + HBP + HFP,
+            LaneByteClk_kHz,
+            LcdClock,
+        ))
+    }); /* FIXME: Value depending on display orientation choice portrait/landscape */
 
     /* Set the Vertical Synchronization Active (VSA) */
-    DSIHOST.vvsacr().modify(|w| w.set_vsa(VerticalSyncActive));
+    DSIHOST.vvsacr().modify(|w| w.set_vsa(VSA));
 
     /* Set the Vertical Back Porch (VBP)*/
-    DSIHOST.vvbpcr().modify(|w| w.set_vbp(VerticalBackPorch));
+    DSIHOST.vvbpcr().modify(|w| w.set_vbp(VBP));
 
     /* Set the Vertical Front Porch (VFP)*/
-    DSIHOST.vvfpcr().modify(|w| w.set_vfp(VerticalFrontPorch));
+    DSIHOST.vvfpcr().modify(|w| w.set_vfp(VFP));
 
     /* Set the Vertical Active period*/
-    DSIHOST.vvacr().modify(|w| w.set_va(VerticalActive));
+    DSIHOST.vvacr().modify(|w| w.set_va(VACT));
 
     /* Configure the command transmission mode */
     DSIHOST.vmcr().modify(|w| w.set_lpce(LPCommandEnable));
@@ -508,14 +511,13 @@ async fn main(_spawner: Spawner) {
 
     /* Timing Configuration */
     const HorizontalSync: u16 = HSA - 1;
-    const VerticalSync: u16 = VerticalSyncActive - 1;
+    const VerticalSync: u16 = VSA - 1;
     const AccumulatedHBP: u16 = HSA + HBP - 1;
-    const AccumulatedVBP: u16 = VerticalSyncActive + VerticalBackPorch - 1;
+    const AccumulatedVBP: u16 = VSA + VBP - 1;
     const AccumulatedActiveW: u16 = LCD_X_Size + HSA + HBP - 1;
-    const AccumulatedActiveH: u16 = VerticalSyncActive + VerticalBackPorch + VerticalActive - 1;
+    const AccumulatedActiveH: u16 = VSA + VBP + VACT - 1;
     const TotalWidth: u16 = LCD_X_Size + HSA + HBP + HFP - 1;
-    const TotalHeight: u16 =
-        VerticalSyncActive + VerticalBackPorch + VerticalActive + VerticalFrontPorch - 1;
+    const TotalHeight: u16 = VSA + VBP + VACT + VFP - 1;
 
     /*
     ######################################
@@ -601,6 +603,7 @@ async fn main(_spawner: Spawner) {
     ######################################
     */
 
+    // FIXME: This should probably be done with a trait or so...
     let mut write_closure = |address: u8, data: &[u8]| dsi.write_cmd(0, address, data).unwrap();
     embedded_dal::drivers::nt35510::init(&mut write_closure, embassy_time::Delay);
 
@@ -644,76 +647,27 @@ async fn main(_spawner: Spawner) {
     const ImageHeight: u16 = LCD_Y_Size; //60; //LCD_Y_Size; // 60 for camera
     */
 
-    /*:
-    ######################################
-     BEGIN HAL_LTDC_ConfigLayer() and LTDC_SetConfig() for Layer 0
-    ######################################
-    */
-
-    const PIXEL_SIZE: u8 = match PixelFormat {
-        Pf::ARGB8888 => 4,
-        Pf::RGB888 => 3,
-        Pf::ARGB4444 | Pf::RGB565 | Pf::ARGB1555 | Pf::AL88 => 2,
-        _ => 1,
-    };
-
-    // Configure the horizontal start and stop position
-    LTDC.layer(0).whpcr().write(|w| {
-        w.set_whstpos(LTDC.bpcr().read().ahbp() + 1 + WindowX0);
-        w.set_whsppos(LTDC.bpcr().read().ahbp() + WindowX1);
-    });
-
-    // Configures the vertical start and stop position
-    LTDC.layer(0).wvpcr().write(|w| {
-        w.set_wvstpos(LTDC.bpcr().read().avbp() + 1 + WindowY0);
-        w.set_wvsppos(LTDC.bpcr().read().avbp() + WindowY1);
-    });
-
-    // Specify the pixel format
-    LTDC.layer(0).pfcr().write(|w| w.set_pf(PixelFormat));
-
-    // Configures the default color values as zero
-    LTDC.layer(0).dccr().modify(|w| {
-        w.set_dcblue(BackcolorBlue);
-        w.set_dcgreen(BackcolorGreen);
-        w.set_dcred(BackcolorRed);
-        w.set_dcalpha(Alpha0);
-    });
-
-    // Specifies the constant alpha value
-    LTDC.layer(0).cacr().write(|w| w.set_consta(Alpha));
-
-    // Specifies the blending factors
-    LTDC.layer(0).bfcr().write(|w| {
-        w.set_bf1(Bf1::CONSTANT);
-        w.set_bf2(Bf2::CONSTANT);
-    });
-
-    // Configure the color frame buffer start address
-    let fb_start_address: u32 = &FRAMEBUFFER[0] as *const _ as u32; // TODO: REPLACE WITH REAL ADDRESS
-    info!(
-        "Setting Framebuffer Start Address: {:010x}",
-        fb_start_address
+    ltdc::config_layer(
+        ltdc::Window {
+            x0: 200,
+            x1: 260,
+            y0: 300,
+            y1: 360,
+        },
+        ltdc::Image {
+            width: 60,
+            height: 60,
+        },
+        Pf::ARGB8888,
+        255,
+        0,
+        ltdc::RGB {
+            red: 0,
+            green: 0,
+            blue: 0,
+        },
+        &FRAMEBUFFER[0] as *const _ as u32,
     );
-    LTDC.layer(0)
-        .cfbar()
-        .write(|w| w.set_cfbadd(fb_start_address));
-
-    // Configures the color frame buffer pitch in byte
-    LTDC.layer(0).cfblr().write(|w| {
-        w.set_cfbp(ImageWidth * PIXEL_SIZE as u16);
-        w.set_cfbll(((WindowX1 - WindowX0) * PIXEL_SIZE as u16) + 3);
-    });
-
-    // Configures the frame buffer line number
-    LTDC.layer(0).cfblnr().write(|w| w.set_cfblnbr(ImageHeight));
-
-    // Enable LTDC_Layer by setting LEN bit
-    LTDC.layer(0).cr().modify(|w| w.set_len(true));
-
-    // Comes after LTDC_SetConfig() in HAL_LTDC_ConfigLayer()
-    //LTDC->SRCR = LTDC_SRCR_IMR;
-    LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
 
     /*
     ######################################
@@ -748,13 +702,23 @@ async fn main(_spawner: Spawner) {
         let time =
             embassy_time::Instant::now().duration_since(embassy_time::Instant::from_ticks(0));
         exti_pin.wait_for_low().await;
-        let event = touch_screen
-            .get_touch_event()
-            .ok()
-            .and_then(|touch_event| touch_screen.process_event(time.into(), touch_event));
-        if let Some(event) = event {
+        let event = touch_screen.get_touch_event().unwrap();
+        //.ok()
+        //.and_then(|touch_event| touch_screen.process_event(time.into(), touch_event));
+        if let Some(point) = event.p1 {
             info!("Got event: {:#?}", event);
+
+            ltdc::config_window(
+                ltdc::Window {
+                    x0: point.x,
+                    x1: point.x + 60,
+                    y0: point.y,
+                    y1: point.y + 60,
+                },
+                Pf::ARGB8888,
+            );
         }
+
         //embassy_time::block_for(embassy_time::Duration::from_millis(10));
 
         /*
