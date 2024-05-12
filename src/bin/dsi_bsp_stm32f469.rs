@@ -76,6 +76,99 @@ async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(config);
     info!("Starting...");
 
+
+
+    let mut sdram = embassy_stm32::fmc::Fmc::sdram_a12bits_d32bits_4banks_bank1(
+        p.FMC,
+        p.PF0, // A0
+        p.PF1,
+        p.PF2,
+        p.PF3,
+        p.PF4,
+        p.PF5, // A5
+        p.PF12,
+        p.PF13,
+        p.PF14,
+        p.PF15,
+        p.PG0,
+        p.PG1, // A11
+        p.PG4, // BA0
+        p.PG5,
+        p.PD14, // D0
+        p.PD15,
+        p.PD0,
+        p.PD1,
+        p.PE7, // D4
+        p.PE8,
+        p.PE9,
+        p.PE10,
+        p.PE11,
+        p.PE12,
+        p.PE13,
+        p.PE14,
+        p.PE15, // D12
+        p.PD8,
+        p.PD9,
+        p.PD10,
+        p.PH8, // D16
+        p.PH9,
+        p.PH10,
+        p.PH11,
+        p.PH12,
+        p.PH13,
+        p.PH14,
+        p.PH15, // D23
+        p.PI0,
+        p.PI1,
+        p.PI2,
+        p.PI3, // D27
+        p.PI6, // D28
+        p.PI7,
+        p.PI9, // D30
+        p.PI10,
+        p.PE0, // NBL0
+        p.PE1,
+        p.PI4, // NBL2
+        p.PI5,
+        p.PH2, // SDCKE0
+        p.PG8, // SDCLK
+        p.PG15, // SDNCAS
+        p.PH3, // SDNE0
+        p.PF11, // SDNRAS
+        p.PC0, // SDNWE
+        stm32_fmc::devices::is42s32800g_6::Is42s32800g {}, // Not exactly the one on the Disco, but let's try...
+    );
+
+    let mut delay = embassy_time::Delay;
+
+    let sdram_size = 32 * 256 * 4096;
+
+    let ram_slice = unsafe {
+        // Initialise controller and SDRAM
+        let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
+
+        // Convert raw pointer to slice
+        core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u32>())
+    };
+
+    // // ----------------------------------------------------------
+    // // Use memory in SDRAM
+    info!("RAM contents before writing: {:x}", ram_slice[..10]);
+
+    ram_slice[0] = 1;
+    ram_slice[1] = 2;
+    ram_slice[2] = 3;
+    ram_slice[3] = 4;
+
+    info!("RAM contents after writing: {:x}", ram_slice[..10]);
+
+    crate::assert_eq!(ram_slice[0], 1);
+    crate::assert_eq!(ram_slice[1], 2);
+    crate::assert_eq!(ram_slice[2], 3);
+    crate::assert_eq!(ram_slice[3], 4);
+
+
+
     /*
        BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
     */
@@ -253,7 +346,7 @@ async fn main(_spawner: Spawner) {
     const DSI_PIXELFORMAT_ARGB888: u8 = 0x00;
 
     const HACT: u16 = LCD_DIMENSIONS.get_width(LCD_ORIENTATION);
-    const VACT: u16 = LCD_DIMENSIONS.get_height(LCD_ORIENTATION);;
+    const VACT: u16 = LCD_DIMENSIONS.get_height(LCD_ORIENTATION);
 
     const VSA: u16 = 120;
     const VBP: u16 = 150;

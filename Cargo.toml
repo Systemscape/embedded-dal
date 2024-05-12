@@ -12,9 +12,10 @@ categories = ["no-std", "embedded", "visualization"]
 readme = "README.md"
 
 [features]
-default = ["defmt", "event_process"]
+default = ["defmt", "event_process", "fmc"]
 defmt = ["dep:defmt"]
 event_process = []
+fmc = ["dep:stm32-fmc"]
 
 [dependencies]
 embassy-stm32 = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = [
@@ -34,6 +35,8 @@ embassy-time = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5b
 embassy-executor = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
 
 embedded-hal = "1.0.0"
+
+stm32-fmc = { version = "0.3", default-features = false, features = ["sdram"], optional = true }
 
 defmt = {version = "0.3", optional = true }
 defmt-rtt = "0.4"
