@@ -119,8 +119,20 @@ pub fn config_window(window: Window, pixel_format: Pf) {
 fn apply_config() {
     LTDC.srcr().modify(|w| w.set_vbr(Vbr::RELOAD));
 
+    // Ensure the modification happens before reading.
+    cortex_m::asm::dsb();
+
     // Wait for config to be applied
     while LTDC.srcr().read().vbr() == Vbr::RELOAD {
         asm::nop();
     }
+}
+
+pub fn set_framebuffer(address: *const u32,) {
+    // Configure the frame buffer start address
+    LTDC.layer(0)
+        .cfbar()
+        .write(|w| w.set_cfbadd(address as u32));
+
+    apply_config();
 }

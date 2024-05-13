@@ -22,4 +22,9 @@ fn main() {
     // here, we ensure the build script is only re-run when
     // `memory.x` is changed.
     println!("cargo:rerun-if-changed=memory.x");
+
+    let config = slint_build::CompilerConfiguration::new()
+        .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer);
+    slint_build::compile_with_config("window.slint", config).unwrap();
+    slint_build::print_rustc_flags().unwrap();
 }
