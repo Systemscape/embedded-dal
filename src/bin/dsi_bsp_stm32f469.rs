@@ -48,8 +48,7 @@ const LcdClock: u16 = 27429; // https://github.com/STMicroelectronics/32f469idis
 /* TXEscapeCkdiv = f(LaneByteClk)/15.62 = 4 */
 const TXEscapeCkdiv: u8 = (LaneByteClk_kHz / 15620) as u8; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L230
 
-const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
-    * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
+const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
 
 use slint::platform::software_renderer::{self, TargetPixel as _};
 
@@ -73,7 +72,7 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [software_renderer::PremultipliedRgb
 
 use embedded_alloc::Heap;
 
-const HEAP_SIZE: usize = 200 * 1024;
+const HEAP_SIZE: usize = 50 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 #[global_allocator]
@@ -93,11 +92,6 @@ struct StmBackend<'a> {
 
 impl Default for StmBackend<'_> {
     fn default() -> Self {
-
-        info!("Starting!");
-        embassy_time::block_for(Duration::from_millis(2000));
-        let mut cp = cortex_m::Peripherals::take().unwrap();
-
         /*
             SystemClock_Config()
         */
@@ -132,12 +126,11 @@ impl Default for StmBackend<'_> {
             divr: Some(PllRDiv::DIV7), // PLLR (Sai actually has special clockdiv register)
         });
 
-        let p = embassy_stm32::init(config);
-        info!("Starting...");
+        info!("Init Embassy...");
 
-        unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
-        slint::platform::set_platform(Box::new(StmBackend::default()))
-            .expect("backend already initialized");
+        let p = embassy_stm32::init(config);
+
+        info!("Done!");
 
         let mut sdram = embassy_stm32::fmc::Fmc::sdram_a12bits_d32bits_4banks_bank1(
             p.FMC,
@@ -207,6 +200,8 @@ impl Default for StmBackend<'_> {
         let ram_slice = unsafe {
             // Initialise controller and SDRAM
             let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
+
+            info!("RAM ADDR: {:x}", ram_ptr as u32);
 
             // Convert raw pointer to slice
             core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u32>())
@@ -831,6 +826,8 @@ impl Default for StmBackend<'_> {
         ######################################
         */
 
+        let mut cp = cortex_m::Peripherals::take().unwrap();
+
         Self {
             window: RefCell::default(),
             exti_input: embassy_stm32::exti::ExtiInput::new(p.PJ5, p.EXTI5, Pull::None),
@@ -890,6 +887,7 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                     ltdc::set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
+                    info!("Swapped FrameBuffer: {:#x}", unsafe { *(work_fb.as_ptr() as *const u32) });
 
                     /*
 
@@ -908,10 +906,12 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                 // handle touch event
                 let button = slint::platform::PointerEventButton::Left;
-                let event = match inner.touch_screen.get_touch_event().unwrap().p1 {
+                let event = match inner.touch_screen.get_touch_event().map(|x| x.p1).ok().flatten() {
                     Some(state) => {
                         let position = slint::PhysicalPosition::new(state.y as i32, state.x as i32)
                             .to_logical(window.scale_factor());
+
+                        info!("Got Touch!");
                         Some(match last_touch.replace(position) {
                             Some(_) => slint::platform::WindowEvent::PointerMoved { position },
                             None => {
@@ -1016,12 +1016,8 @@ async fn main(_spawner: Spawner) {
     slint::platform::set_platform(Box::new(StmBackend::default()))
         .expect("backend already initialized");
 
-
-        let window = MainWindow::new().unwrap();
-
-    
-        window.run().unwrap();
-    
+    let window = MainWindow::new().unwrap();
+    window.run().unwrap();
 }
 
 slint::include_modules!();

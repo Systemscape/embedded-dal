@@ -1,9 +1,18 @@
+import { Button, HorizontalBox } from "std-widgets.slint";
 export component MainWindow inherits Window {
     title: "EnergyMNG Demo";
     min-width: 800px;
     min-height: 480px;
 
-    Text {
-        text: "hello";
+HorizontalBox {
+    btn := Button {
+        text: "OK!"; 
+        width: 300px;
+        height: 200px;
+        clicked => { txt.text = "Clicked"; }
+    }
+
+    txt := Text { text: "Hello World"; }
+    
     }
 }

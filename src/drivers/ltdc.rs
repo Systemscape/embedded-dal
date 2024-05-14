@@ -134,5 +134,7 @@ pub fn set_framebuffer(address: *const u32,) {
         .cfbar()
         .write(|w| w.set_cfbadd(address as u32));
 
+    defmt::info!("Setting cfbadd: {:x}", address);
+
     apply_config();
 }
