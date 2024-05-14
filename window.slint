@@ -3,16 +3,25 @@ export component MainWindow inherits Window {
     title: "EnergyMNG Demo";
     min-width: 800px;
     min-height: 480px;
+    background: white;
+    
+    property<bool> state: false;
 
 HorizontalBox {
-    btn := Button {
-        text: "OK!"; 
+    btn := Rectangle {
         width: 300px;
         height: 200px;
-        clicked => { txt.text = "Clicked"; }
+        background: state ? black : red;
+
+
+        TouchArea {
+            clicked => { state = !state; }
+        }
+
     }
 
-    txt := Text { text: "Hello World"; }
-    
-    }
+    if state :  Text { text: "True"; color: black; }
+    if !state :  Text { text: "False"; color: black; }
+
+}
 }

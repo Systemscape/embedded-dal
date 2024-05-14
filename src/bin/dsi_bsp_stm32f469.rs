@@ -48,31 +48,30 @@ const LcdClock: u16 = 27429; // https://github.com/STMicroelectronics/32f469idis
 /* TXEscapeCkdiv = f(LaneByteClk)/15.62 = 4 */
 const TXEscapeCkdiv: u8 = (LaneByteClk_kHz / 15620) as u8; // https://github.com/STMicroelectronics/32f469idiscovery-bsp/blob/ec051de2bff3e1b73a9ccd49c9b85abf7320add9/stm32469i_discovery_lcd.c#L230
 
-const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
+const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
+    * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
 
 use slint::platform::software_renderer::{self, TargetPixel as _};
 
-pub type TargetPixel = software_renderer::PremultipliedRgbaColor;
+pub type TargetPixel = rgb::RGB<u8>;
 
 #[link_section = ".frame_buffer"]
-static mut FB1: [TargetPixel; NUM_PIXELS] = [software_renderer::PremultipliedRgbaColor {
-    red: 0,
-    green: 0,
-    blue: 0,
-    alpha: 0,
+static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
+    r: 0,
+    g: 0,
+    b: 0,
 }; NUM_PIXELS];
 
 #[link_section = ".frame_buffer"]
-static mut FB2: [TargetPixel; NUM_PIXELS] = [software_renderer::PremultipliedRgbaColor {
-    red: 0,
-    green: 0,
-    blue: 0,
-    alpha: 0,
+static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
+    r: 0,
+    g: 0,
+    b: 0,
 }; NUM_PIXELS];
 
 use embedded_alloc::Heap;
 
-const HEAP_SIZE: usize = 50 * 1024;
+const HEAP_SIZE: usize = 30 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 #[global_allocator]
@@ -81,6 +80,7 @@ static ALLOCATOR: Heap = Heap::empty();
 struct StmBackendInner<'a> {
     scb: cortex_m::peripheral::SCB,
     delay: embassy_time::Delay,
+    reset: Output<'a>,
     touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
 }
 
@@ -272,6 +272,8 @@ impl Default for StmBackend<'_> {
 
         let diag = touch_screen.get_diagnostics().unwrap();
         info!("Got touch screen diag: {:#?}", diag);
+
+        info!("Get touch event: {:#?}", touch_screen.get_touch_event());
 
         // END TOUCHSCREEN
 
@@ -764,52 +766,19 @@ impl Default for StmBackend<'_> {
         ######################################
         */
 
-        use embedded_dal::test_images::systemscape_logo::FRAMEBUFFER;
-
-        /* Initialize the LCD pixel width and pixel height */
-        const WindowX0: u16 = 200; //100;
-        const WindowX1: u16 = 260; //100 + 60; // // 60 for camera
-        const WindowY0: u16 = 200; //100;
-        const WindowY1: u16 = 260; //100 + 60; //LCD_Y_Size; // 60 for camera
-        const PixelFormat: Pf = Pf::ARGB8888;
-        const Alpha: u8 = 255;
-        const Alpha0: u8 = 0;
-        const BackcolorBlue: u8 = 0;
-        const BackcolorGreen: u8 = 0;
-        const BackcolorRed: u8 = 0;
-        const ImageWidth: u16 = 60; //LCD_X_Size; // 60 for camera
-        const ImageHeight: u16 = 60; //LCD_Y_Size; // 60 for camera
-
-        /*
-        use embedded_dal::test_images::systemscape::FRAMEBUFFER;
-
-        /* Initialize the LCD pixel width and pixel height */
-        const WindowX0: u16 = 0; //100;
-        const WindowX1: u16 = LCD_X_Size; //100 + 60; // // 60 for camera
-        const WindowY0: u16 = 0; //100;
-        const WindowY1: u16 = LCD_Y_Size; //100 + 60; //LCD_Y_Size; // 60 for camera
-        const PixelFormat: Pf = Pf::ARGB8888;
-        const Alpha: u8 = 255;
-        const Alpha0: u8 = 0;
-        const BackcolorBlue: u8 = 0;
-        const BackcolorGreen: u8 = 0;
-        const BackcolorRed: u8 = 0;
-        const ImageWidth: u16 = LCD_X_Size; //60; //LCD_X_Size; // 60 for camera
-        const ImageHeight: u16 = LCD_Y_Size; //60; //LCD_Y_Size; // 60 for camera
-        */
 
         ltdc::config_layer(
             ltdc::Window {
-                x0: 200,
-                x1: 260,
-                y0: 300,
-                y1: 360,
+                x0: 0,
+                x1: 800,
+                y0: 0,
+                y1: 480,
             },
             ltdc::Image {
-                width: 60,
-                height: 60,
+                width: 800,
+                height: 480,
             },
-            Pf::ARGB8888,
+            Pf::RGB888,
             255,
             0,
             ltdc::RGB {
@@ -817,7 +786,7 @@ impl Default for StmBackend<'_> {
                 green: 0,
                 blue: 0,
             },
-            &FRAMEBUFFER[0] as *const _ as u32,
+            unsafe { &FB1[0] as *const _ as u32 },
         );
 
         /*
@@ -834,6 +803,7 @@ impl Default for StmBackend<'_> {
             inner: RefCell::new(StmBackendInner {
                 scb: cp.SCB,
                 delay,
+                reset,
                 touch_screen,
             }),
         }
@@ -878,16 +848,20 @@ impl slint::platform::Platform for StmBackend<'_> {
             slint::platform::update_timers_and_animations();
 
             if let Some(window) = self.window.borrow().clone() {
+
                 window.draw_if_needed(|renderer| {
                     // Busy-wait for apply pending. Unnecessary?
                     //while ltdc::apply_pending() {}
 
-                    renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
+                    info!("start rendering");
+                    //renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
                     ltdc::set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
-                    info!("Swapped FrameBuffer: {:#x}", unsafe { *(work_fb.as_ptr() as *const u32) });
+                    info!("Swapped FrameBuffer: {:#x}", unsafe {
+                        *(work_fb.as_ptr() as *const u32)
+                    });
 
                     /*
 
@@ -906,16 +880,24 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                 // handle touch event
                 let button = slint::platform::PointerEventButton::Left;
-                let event = match inner.touch_screen.get_touch_event().map(|x| x.p1).ok().flatten() {
+                let event = match inner
+                    .touch_screen
+                    .get_touch_event()
+                    .map(|x| x.p1)
+                    .ok()
+                    .flatten()
+                {
                     Some(state) => {
                         let position = slint::PhysicalPosition::new(state.y as i32, state.x as i32)
                             .to_logical(window.scale_factor());
 
-                        info!("Got Touch!");
+                        info!("Got Touch: {:#?}", state);
                         Some(match last_touch.replace(position) {
                             Some(_) => slint::platform::WindowEvent::PointerMoved { position },
                             None => {
+                                info!("Send Pointer Pressed");
                                 slint::platform::WindowEvent::PointerPressed { position, button }
+
                             }
                         })
                     }
@@ -1021,3 +1003,4 @@ async fn main(_spawner: Spawner) {
 }
 
 slint::include_modules!();
+

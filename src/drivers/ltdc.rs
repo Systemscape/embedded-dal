@@ -128,11 +128,13 @@ fn apply_config() {
     }
 }
 
-pub fn set_framebuffer(address: *const u32,) {
+pub fn set_framebuffer(address: *const u32) {
     // Configure the frame buffer start address
     LTDC.layer(0)
         .cfbar()
         .write(|w| w.set_cfbadd(address as u32));
+
+    cortex_m::asm::dsb();
 
     defmt::info!("Setting cfbadd: {:x}", address);
 
