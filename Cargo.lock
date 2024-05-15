@@ -854,7 +854,6 @@ dependencies = [
  "embedded-hal 1.0.0",
  "num_enum",
  "panic-probe",
- "rgb",
  "slint",
  "slint-build",
  "stm32-fmc",
