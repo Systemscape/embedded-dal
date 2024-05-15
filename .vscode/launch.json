@@ -1,0 +1,44 @@
+  {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "type": "probe-rs-debug",
+        "request": "launch",
+        "name": "Debug",
+        "cwd": "${workspaceFolder}",
+        //"speed": 24000, //!MODIFY (or remove)
+        //"probe": "VID:PID:<Serial>", //!MODIFY (or remove)
+        "runtimeExecutable": "probe-rs",
+        "runtimeArgs": ["dap-server"],
+        "chip": "STM32F469NIHx", //!MODIFY
+        //"chip": "STM32F767ZITx", //!MODIFY
+        "flashingConfig": {
+          "flashingEnabled": true,
+          "resetAfterFlashing": true,
+          "haltAfterReset": false
+        },
+        "coreConfigs": [
+          {
+            "coreIndex": 0,
+            //"programBinary": "${workspaceRoot}/target/thumbv7em-none-eabihf/debug/${workspaceFolderBasename}",
+            "programBinary": "${workspaceRoot}/target/thumbv7em-none-eabi/debug/dsi_bsp_stm32f469",
+            "svdFile": "${workspaceRoot}/.vscode/stm32f469.svd",
+          }
+        ],
+        "env": {
+          //!MODIFY (or remove)
+          "RUST_LOG": "info" // If you set this variable, check the VSCode console log window for the location of the log file.
+        },
+        "consoleLogLevel": "Console" //Info, Debug
+      }
+    ],
+    "setupCommands": [
+      {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+      },
+      { "text": "set output-radix 16" }
+  ]  
+  }
+  

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::config::Orientation::{self, *};
 use embedded_hal::delay::DelayNs;
 
@@ -78,6 +80,7 @@ pub fn init(mut write: impl FnMut(u8, &[u8]), mut delay: impl DelayNs, orientati
 pub fn set_brightness(mut write: impl FnMut(u8, &[u8]), value: u8) {
     write(NT35510_CMD_WRDISBV, &[value]);
 }
+
 const NT35510_WRITES_0: &[u8] = &[0x55, 0xAA, 0x52, 0x08, 0x01, 0xF0]; // LV2:  Page 1 enable
 const NT35510_WRITES_1: &[u8] = &[0x03, 0x03, 0x03, 0xB0]; // AVDD: 5.2V
 const NT35510_WRITES_2: &[u8] = &[0x46, 0x46, 0x46, 0xB6]; // AVDD: Ratio
