@@ -1,5 +1,5 @@
 use cortex_m::asm;
-use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf, Vbr};
+use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Pf, Vbr};
 use embassy_stm32::pac::LTDC;
 
 pub struct Window {
@@ -108,7 +108,7 @@ pub fn config_window(window: Window, pixel_format: Pf) {
     });
 
     // Configures the color frame buffer pitch in byte
-    // IMPORTANT: This when splitt into two calls to modify() make sure to reload first (SRCR->IMR)!
+    // IMPORTANT: This when splitt into two calls to modify() make sure to reload first (SRCR->IMR), i.e., apply_config()!
     LTDC.layer(0).cfblr().modify(|w| {
         w.set_cfbll(((window.x1 - window.x0) * pixel_format_to_size(pixel_format) as u16) + 3);
     });
@@ -137,6 +137,7 @@ pub fn set_framebuffer(address: *const u32) {
     cortex_m::asm::dsb();
 
     defmt::info!("Setting cfbadd: {:x}", address);
+    defmt::info!("First 32 bits: {:x}", unsafe {*address});
 
     apply_config();
 }
