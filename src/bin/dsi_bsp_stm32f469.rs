@@ -47,27 +47,9 @@ use slint::platform::software_renderer::{self, TargetPixel as _};
 
 pub type TargetPixel = ARGB8888;
 
-#[link_section = ".frame_buffer"]
-static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
-    a: 0,
-    r: 0,
-    g: 0,
-    b: 0,
-}; NUM_PIXELS];
-
-#[link_section = ".frame_buffer"]
-static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
-    a: 0,
-    r: 0,
-    g: 0,
-    b: 0,
-}; NUM_PIXELS];
-
 use embedded_alloc::Heap;
 
 const HEAP_SIZE: usize = 200 * 1024;
-
-static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 #[global_allocator]
 static ALLOCATOR: Heap = Heap::empty();
@@ -77,6 +59,8 @@ struct StmBackendInner<'a> {
     delay: embassy_time::Delay,
     reset: Output<'a>,
     touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
+    fb1: &'a mut [TargetPixel; NUM_PIXELS],
+    fb2: &'a mut [TargetPixel; NUM_PIXELS],
 }
 
 struct StmBackend<'a> {
@@ -85,7 +69,7 @@ struct StmBackend<'a> {
     inner: RefCell<StmBackendInner<'a>>,
 }
 
-impl StmBackend<'_> {
+impl<'a> StmBackend<'a> {
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
@@ -97,6 +81,8 @@ impl StmBackend<'_> {
         pj5: PJ5,
         ph7: PH7,
         exti5: EXTI5,
+        fb1: &'a mut [TargetPixel; NUM_PIXELS],
+        fb2: &'a mut [TargetPixel; NUM_PIXELS],
     ) -> Self {
         /*
            BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
@@ -334,6 +320,8 @@ impl StmBackend<'_> {
                 delay,
                 reset,
                 touch_screen,
+                fb1,
+                fb2,
             }),
         }
     }
@@ -354,18 +342,13 @@ impl slint::platform::Platform for StmBackend<'_> {
         let inner = &mut *self.inner.borrow_mut();
 
         // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
-        let (fb1, fb2) = unsafe {
-            (
-                &mut *core::ptr::addr_of_mut!(FB1),
-                &mut *core::ptr::addr_of_mut!(FB2),
-            )
-        };
+        let (fb1, fb2) = (&mut inner.fb1, &mut inner.fb2);
 
         // To veryify that the default framebuffer still works.
         embassy_time::block_for(Duration::from_millis(2000));
 
-        let mut displayed_fb: &mut [TargetPixel] = fb1;
-        let mut work_fb: &mut [TargetPixel] = fb2;
+        let mut displayed_fb: &mut [TargetPixel] = *fb1;
+        let mut work_fb: &mut [TargetPixel] = *fb2;
 
         let mut last_touch = None;
         self.window
@@ -565,39 +548,56 @@ async fn main(_spawner: Spawner) {
 
     let mut delay = embassy_time::Delay;
 
-    let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
+    let ram_ptr: *mut u8 = sdram.init(&mut delay) as *mut _;
 
-    {
-        let ram_slice = unsafe {
-            info!("RAM ADDR: {:x}", ram_ptr as u32);
+    let ram_slice = unsafe {
+        info!("RAM ADDR: {:x}", ram_ptr as u8);
 
-            // Convert raw pointer to slice
-            core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u32>())
-        };
+        // Convert raw pointer to slice
+        core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u8>())
+    };
 
-        // // ----------------------------------------------------------
-        // // Use memory in SDRAM
-        info!("RAM contents before writing: {:x}", ram_slice[..10]);
+    // // ----------------------------------------------------------
+    // // Use memory in SDRAM
+    info!("RAM contents before writing: {:x}", ram_slice[..10]);
 
-        ram_slice[0] = 1;
-        ram_slice[1] = 2;
-        ram_slice[2] = 3;
-        ram_slice[3] = 4;
+    ram_slice[0] = 1;
+    ram_slice[1] = 2;
+    ram_slice[2] = 3;
+    ram_slice[3] = 4;
 
-        info!("RAM contents after writing: {:x}", ram_slice[..10]);
+    info!("RAM contents after writing: {:x}", ram_slice[..10]);
 
-        crate::assert_eq!(ram_slice[0], 1);
-        crate::assert_eq!(ram_slice[1], 2);
-        crate::assert_eq!(ram_slice[2], 3);
-        crate::assert_eq!(ram_slice[3], 4);
+    crate::assert_eq!(ram_slice[0], 1);
+    crate::assert_eq!(ram_slice[1], 2);
+    crate::assert_eq!(ram_slice[2], 3);
+    crate::assert_eq!(ram_slice[3], 4);
 
-        ram_slice.fill(0x00000000);
-    }
+    embassy_time::block_for(Duration::from_millis(1000));
 
-    unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
+    ram_slice.fill(0x00);
 
+    let (heap, rest) = ram_slice.split_at_mut(HEAP_SIZE);
+
+    let (fb1, rest) = rest.split_at_mut(FB_SIZE);
+    let (fb2, rest) = rest.split_at_mut(FB_SIZE);
+
+    unsafe { ALLOCATOR.init(heap.as_ptr() as usize, HEAP_SIZE) }
+
+    const FB_SIZE: usize = NUM_PIXELS * core::mem::size_of::<ARGB8888>();
+
+    let (fb1, fb2) = unsafe {
+        (
+            core::mem::transmute::<&mut [u8; FB_SIZE], &mut [TargetPixel; NUM_PIXELS]>(
+                fb1.try_into().unwrap(),
+            ),
+            core::mem::transmute::<&mut [u8; FB_SIZE], &mut [TargetPixel; NUM_PIXELS]>(
+                fb2.try_into().unwrap(),
+            ),
+        )
+    };
     slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST, p.LTDC, p.I2C1, p.PB8, p.PB9, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5,
+        p.DSIHOST, p.LTDC, p.I2C1, p.PB8, p.PB9, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, fb1, fb2,
     )))
     .expect("backend already initialized");
 
