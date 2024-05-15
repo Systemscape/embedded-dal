@@ -371,12 +371,13 @@ impl slint::platform::Platform for StmBackend<'_> {
                     renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
-                    //info!("FrameBuffer[0..20]: {:#?}", work_fb[0..20]);
-                    //info!("FrameBuffer[450..480]: {:#?}", work_fb[450..480]);
+                    info!("FrameBuffer[0..20]: {:#?}", work_fb[0..20]);
+                    info!("FrameBuffer[260..280]: {:#?}", work_fb[260..280]);
 
-                    for pixel in &work_fb[0..800] {
+                    /*
+                    for pixel in &work_fb[0..20] {
                         info!("{}", pixel);
-                    }
+                    }*/
 
                     embassy_time::block_for(Duration::from_millis(5000));
 
@@ -575,7 +576,9 @@ async fn main(_spawner: Spawner) {
 
     embassy_time::block_for(Duration::from_millis(1000));
 
+    info!("Erasing RAM...");
     ram_slice.fill(0x00);
+    info!("Done!");
 
     let (heap, rest) = ram_slice.split_at_mut(HEAP_SIZE);
 
