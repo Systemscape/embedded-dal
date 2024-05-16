@@ -1,4 +1,5 @@
-import { Button, HorizontalBox } from "std-widgets.slint";
+import { Button, HorizontalBox, Switch } from "std-widgets.slint";
+
 export component MainWindow inherits Window {
     title: "EnergyMNG Demo";
     min-width: 800px;
@@ -6,26 +7,50 @@ export component MainWindow inherits Window {
     background: white;
     property <bool> state: false;
 
-    HorizontalBox {
-        btn := Rectangle {
-            width: 300px;
-            height: 200px;
-            background: state ? black : red;
+    function update(val: bool) {
+        state = val;
+        btn.background = state ? Colors.black : Colors.red;
+    }
 
-            TouchArea {
+    HorizontalBox {
+        VerticalLayout {
+            spacing: 20px;
+            btn := Rectangle {
+                width: 300px;
+                height: 200px;
+                background: state ? black : red;
+                TouchArea {
+                    clicked => {
+                        state = !state;
+                    }
+                }
+            }
+
+            Button {
+                text: "Button";
+                width: 100px;
+                height: 50px;
                 clicked => {
                     state = !state;
                 }
             }
         }
 
-        if state:  Text {
-            text: "True";
+        Text {
+            text: state ? "True" : "False";
             color: black;
         }
-        if !state:  Text {
-            text: "False";
-            color: black;
+
+        if state: Image {
+            source: @image-url("./Artboard_Icon.png");
+            width: 200px;
+            height: 200px;
+            colorize: black;
+        }
+        if !state: Image {
+            source: @image-url("./Artboard_Icon.png");
+            width: 200px;
+            height: 200px;
         }
     }
 }

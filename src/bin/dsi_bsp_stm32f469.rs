@@ -392,9 +392,6 @@ impl slint::platform::Platform for StmBackend<'_> {
 
             if let Some(window) = self.window.borrow().clone() {
                 window.draw_if_needed(|renderer| {
-                    // Busy-wait for apply pending. Unnecessary?
-                    //while ltdc::apply_pending() {}
-
                     info!("start rendering");
                     renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
@@ -416,7 +413,7 @@ impl slint::platform::Platform for StmBackend<'_> {
                         let position = slint::PhysicalPosition::new(state.y as i32, state.x as i32)
                             .to_logical(window.scale_factor());
 
-                        //info!("Got Touch: {:#?}", state);
+                        info!("Got Touch: {:#?}", state);
                         Some(match last_touch.replace(position) {
                             Some(_) => slint::platform::WindowEvent::PointerMoved { position },
                             None => {
