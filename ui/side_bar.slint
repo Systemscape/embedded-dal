@@ -1,0 +1,159 @@
+import { StyleMetrics, ScrollView } from "std-widgets.slint";
+import { GlobalSettings } from "global_settings.slint";
+
+component SideBarItem inherits Rectangle {
+    in property <bool> selected;
+    in property <bool> has-focus;
+    in-out property <string> text<=> label.text;
+    in-out property <image> icon<=> label-icon.source;
+
+    callback clicked<=>touch.clicked;
+
+    min-height: l.preferred-height;
+
+    states [
+        pressed when touch.pressed: {
+            state.opacity: 0.2;
+        }
+        hover when touch.has-hover: {
+            state.opacity: 0.4;
+        }
+        selected when root.selected: {
+            state.opacity: 1;
+        }
+        focused when root.has-focus: {
+            state.opacity: 0.2;
+        }
+    ]state := Rectangle {
+        opacity: 0;
+        background: StyleMetrics.window-background.darker(0.2);
+
+        animate opacity { duration: 50ms; }
+    }
+
+    l := HorizontalLayout {
+        y: (parent.height - self.height) / 2;
+        padding: 10px;
+        spacing: 50px;
+        alignment: start;
+
+        Rectangle {
+            label-icon := Image {
+                x: 5px;
+                y: 0px;
+                // ensure there is no binding loop
+                height: 100%;
+            }
+
+            //width:20px;
+        }
+
+        label := Text {
+            color: StyleMetrics.default-text-color;
+            vertical-alignment: center;
+            font-size: 24px;
+        }
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+    }
+}
+
+export component SideBar inherits ScrollView {
+    in property <[{icon: image, name: string}]> model: [];
+    in property <string> title<=> label.text;
+    in property <image> logo<=> logo.source;
+    property <int> current-item<=> GlobalSettings.current-page;
+    out property <int> current-focused: fs.has-focus ? fs.focused-tab : -1;
+    // The currently focused tab
+
+    //height: 200px;
+    viewport-width: 180px;
+
+    width: 200px;
+    forward-focus: fs;
+    accessible-role: tab;
+    accessible-delegate-focus: root.current-focused >= 0 ? root.current-focused : root.current-item;
+
+    // Make sure the menu items don't exceed the sidebar
+    //clip: true;
+
+    Rectangle {
+        fs := FocusScope {
+            key-pressed(event) => {
+                if (event.text == "\n") {
+                    root.current-item = root.current-focused;
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    self.focused-tab = Math.max(self.focused-tab - 1,  0);
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    self.focused-tab = Math.min(self.focused-tab + 1, root.model.length - 1);
+                    return accept;
+                }
+                return reject;
+            }
+
+            key-released(event) => {
+                if (event.text == " ") {
+                    root.current-item = root.current-focused;
+                    return accept;
+                }
+                return reject;
+            }
+
+            property <int> focused-tab: 0;
+
+            x: 0;
+            width: 0;
+            // Do not react on clicks
+        }
+    }
+
+    VerticalLayout {
+        padding-top: StyleMetrics.layout-padding;
+        padding-bottom: StyleMetrics.layout-padding;
+        spacing: StyleMetrics.layout-spacing;
+        alignment: start;
+        HorizontalLayout {
+            padding: 2px;
+            logo := Image {
+                width: 30px;
+            }
+
+            label := Text {
+                font-size: 16px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        navigation := VerticalLayout {
+            alignment: start;
+            vertical-stretch: 0;
+            for item[index] in root.model: SideBarItem {
+                clicked => {
+                    root.current-item = index;
+                }
+
+                has-focus: index == root.current-focused;
+                text: item.name;
+                icon: item.icon;
+                selected: index == root.current-item;
+            }
+        }
+
+        VerticalLayout {
+            bottom := VerticalLayout {
+                padding-left: StyleMetrics.layout-padding;
+                padding-right: StyleMetrics.layout-padding;
+
+                @children
+            }
+        }
+    }
+}

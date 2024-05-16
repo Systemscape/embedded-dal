@@ -136,8 +136,7 @@ pub fn set_framebuffer(address: *const u32) {
 
     cortex_m::asm::dsb();
 
-    defmt::info!("Setting cfbadd: {:x}", address);
-    defmt::info!("First 32 bits: {:x}", unsafe { *address });
+    defmt::trace!("Setting cfbadd: {:x}", address);
 
     apply_config();
 }

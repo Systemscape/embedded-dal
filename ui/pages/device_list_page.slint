@@ -1,0 +1,74 @@
+import { HorizontalBox, VerticalBox, StandardTableView, GroupBox} from "std-widgets.slint";
+import { GlobalSettings } from "../global_settings.slint";
+import { Page } from "page.slint";
+
+export global DeviceListPageAdapter {
+    in property <[[StandardListViewItem]]> row_data: [
+        [
+            { text: "Board 1" },
+            { text: "STM32H743ZI2" },
+            { text: "1" },
+            { text: "Rack 1" },
+        ],
+        [
+            { text: "Board 2" },
+            { text: "STM32F743ZI" },
+            { text: "1" },
+            { text: "Rack 2" },
+        ],
+        [
+            { text: "Board 3" },
+            { text: "STM32H743ZI2" },
+            { text: "1" },
+            { text: "Rack 2" },
+        ],
+        [
+            { text: "Board 4" },
+            { text: "STM32F743ZI" },
+            { text: "1" },
+            { text: "Rack 1" },
+        ],
+        [
+            { text: "Board 5" },
+            { text: "STM32H743ZI2" },
+            { text: "1" },
+            { text: "Rack 3" },
+        ],
+        [
+            { text: "Board 6" },
+            { text: "STM32H743ZI2" },
+            { text: "1" },
+            { text: "Rack 1" },
+        ],
+    ];
+
+    callback sort_ascending(int);
+    callback sort_descending(int);
+}
+
+export component DeviceListPage inherits Page {
+    title: @tr("Devices");
+    show-enable-switch: false;
+    description: @tr("StandardTableView can be used to display a list of text elements in columns and rows. It can be imported from \"std-widgets.slint\"");
+
+    HorizontalBox {
+        vertical-stretch: 1;
+        StandardTableView {
+            sort-ascending(index) => {
+                DeviceListPageAdapter.sort_ascending(index);
+            }
+
+            sort-descending(index) => {
+                DeviceListPageAdapter.sort-descending(index);
+            }
+
+            columns: [
+                { title: @tr("Name") },
+                { title: @tr("Chip") },
+                { title: @tr("Version") },
+                { title: @tr("Location") },
+            ];
+            rows: DeviceListPageAdapter.row_data;
+        }
+    }
+}

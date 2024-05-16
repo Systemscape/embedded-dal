@@ -1,0 +1,68 @@
+import { HorizontalBox, VerticalBox, StandardTableView, GroupBox} from "std-widgets.slint";
+import { GlobalSettings } from "../global_settings.slint";
+import { Page } from "page.slint";
+
+export global BalancePageAdapter {
+    in property <[[StandardListViewItem]]> row_data: [
+        [
+            { text: "Test 1" },
+            { text: "10:33" },
+            { text: "10" },
+            { text: "0.80 €" },
+        ],
+        [
+            { text: "Test 2" },
+            { text: "15:25" },
+            { text: "14" },
+            { text: "1.31 €" },
+        ],
+    ];
+
+    callback sort_ascending(int);
+    callback sort_descending(int);
+}
+
+export component BalancePage inherits Page {
+    title: @tr("Balance");
+    show-enable-switch: false;
+    description: @tr("StandardTableView can be used to display a list of text elements in columns and rows. It can be imported from \"std-widgets.slint\"");
+
+    VerticalLayout {
+
+        Text {
+            text: "Balance left: " + GlobalSettings.balance + " €";
+            horizontal-alignment: center;
+        }
+
+        HorizontalBox {
+            vertical-stretch: 1;
+
+            Rectangle {
+                border-color: black;
+                border-width: 2px;
+                StandardTableView {
+                    x: parent.border-width;
+                    y: parent.border-width;
+                    width: parent.width - 2 * parent.border-width;
+                    height: parent.height - 2 * parent.border-width;
+                    
+                    sort-ascending(index) => {
+                        BalancePageAdapter.sort_ascending(index);
+                    }
+
+                    sort-descending(index) => {
+                        BalancePageAdapter.sort-descending(index);
+                    }
+
+                    columns: [
+                        { title: @tr("Name") },
+                        { title: @tr("Duration") },
+                        { title: @tr("Runs") },
+                        { title: @tr("Price") },
+                    ];
+                    rows: BalancePageAdapter.row_data;
+                }
+            }
+        }
+    }
+}
