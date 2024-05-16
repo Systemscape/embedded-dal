@@ -1,39 +1,31 @@
-export component MainWindow inherits Window {
-    title: "Test";
-    min-width: 800px;
-    min-height: 480px;
-    background: black;
-    
-
-    Rectangle {x: 10px; y: 0px; background: blue; width: 10px; height: 400px;}
-}
-
-/*
 import { Button, HorizontalBox } from "std-widgets.slint";
 export component MainWindow inherits Window {
     title: "EnergyMNG Demo";
     min-width: 800px;
     min-height: 480px;
     background: white;
-    
-    property<bool> state: false;
+    property <bool> state: false;
 
-HorizontalBox {
-    btn := Rectangle {
-        width: 300px;
-        height: 200px;
-        background: state ? black : red;
+    HorizontalBox {
+        btn := Rectangle {
+            width: 300px;
+            height: 200px;
+            background: state ? black : red;
 
-
-        TouchArea {
-            clicked => { state = !state; }
+            TouchArea {
+                clicked => {
+                    state = !state;
+                }
+            }
         }
 
+        if state:  Text {
+            text: "True";
+            color: black;
+        }
+        if !state:  Text {
+            text: "False";
+            color: black;
+        }
     }
-
-    if state :  Text { text: "True"; color: black; }
-    if !state :  Text { text: "False"; color: black; }
-
 }
-}
-*/
