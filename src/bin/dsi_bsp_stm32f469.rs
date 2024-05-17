@@ -7,14 +7,12 @@ use alloc::rc::Rc;
 
 use cortex_m::peripheral::SCB;
 
-use embassy_time::Duration;
 use embedded_dal::{
     config::{Dimensions, Orientation},
     drivers::{
         dsi::{self, Dsi},
-        ft6x36::{Ft6x36, TouchEvent},
+        ft6x36::Ft6x36,
         ltdc,
-        nt35510::*,
     },
 };
 
@@ -22,7 +20,6 @@ use embassy_executor::Spawner;
 
 use core::cell::RefCell;
 
-use cortex_mpu::Size;
 use defmt::*;
 use embassy_stm32::{
     exti::ExtiInput,
@@ -52,8 +49,6 @@ const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
 
 const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
     * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
-
-use slint::platform::software_renderer::{self, TargetPixel as _};
 
 pub type TargetPixel = ARGB8888;
 
@@ -166,7 +161,7 @@ impl<'a> StmBackend<'a> {
 
         // END TOUCHSCREEN
 
-        let mut led = Output::new(pg6, Level::High, Speed::Low);
+        //let mut led = Output::new(pg6, Level::High, Speed::Low); // Currently unused
 
         /*
         BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
@@ -178,7 +173,7 @@ impl<'a> StmBackend<'a> {
 
         // Here comes HAL_DSI_ConfigPhyTimer() in the BSP example. We have already configured it at the beginning.
 
-        const PCPolarity: bool = false; // LTDC_PCPOLARITY_IPC == 0
+        let ltdc_pc_polarity = Pcpol::RISINGEDGE; // LTDC_PCPOLARITY_IPC == 0
 
         let ltdc_de_polarity: Depol = if dsi_config.de_polarity == false {
             Depol::ACTIVELOW
@@ -223,7 +218,7 @@ impl<'a> StmBackend<'a> {
             w.set_hspol(ltdc_hs_polarity);
             w.set_vspol(ltdc_vs_polarity);
             w.set_depol(ltdc_de_polarity);
-            w.set_pcpol(Pcpol::RISINGEDGE); // #define LTDC_PCPOLARITY_IPC 0x00000000U
+            w.set_pcpol(ltdc_pc_polarity); // #define LTDC_PCPOLARITY_IPC 0x00000000U
         });
 
         // Set Synchronization size
@@ -334,18 +329,14 @@ impl<'a> StmBackend<'a> {
         ######################################
         */
 
-        let mut delay = embassy_time::Delay;
-
         Self {
             window: RefCell::default(),
             exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
             inner: RefCell::new(StmBackendInner {
                 scb: scb,
-                delay,
+                delay: embassy_time::Delay,
                 reset,
                 touch_screen,
-                //fb1,
-                //fb2,
             }),
         }
     }
@@ -364,8 +355,6 @@ impl slint::platform::Platform for StmBackend<'_> {
 
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let inner = &mut *self.inner.borrow_mut();
-
-        //let (fb1, fb2) = (&mut inner.fb1, &mut inner.fb2);
 
         // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
         let (fb1, fb2) = unsafe {
@@ -415,8 +404,25 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                         //info!("Got Touch: {:#?}", state);
                         Some(match last_touch.replace(position) {
-                            Some(_) => {
-                                slint::platform::WindowEvent::PointerMoved { position } },
+                            Some(_) => slint::platform::WindowEvent::PointerMoved { position },
+                            /*
+                            Some(pos_old) => {
+                                if (position.x != pos_old.x) || (position.y != pos_old.y) {
+                                    warn!(
+                                        "Sending pointer scrolled: dx {}, dy {}",
+                                        position.x - pos_old.x,
+                                        position.y - pos_old.y
+                                    );
+                                    slint::platform::WindowEvent::PointerScrolled {
+                                        position: position,
+                                        delta_x: pos_old.x - position.x,
+                                        delta_y: pos_old.y - position.y,
+                                    }
+                                } else {
+                                    slint::platform::WindowEvent::PointerMoved { position }
+                                }
+                            }
+                            */
                             None => {
                                 slint::platform::WindowEvent::PointerPressed { position, button }
                             }
@@ -435,6 +441,7 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                     // removes hover state on widgets
                     if is_pointer_release_event {
+                        warn!("Send PointerExited Event!");
                         window.dispatch_event(slint::platform::WindowEvent::PointerExited);
                     }
                 }
@@ -593,11 +600,9 @@ async fn main(_spawner: Spawner) {
     crate::assert_eq!(ram_slice[0], 1);
     crate::assert_eq!(ram_slice[ram_slice.len() - 1], 5);
 
-
     info!("Erasing RAM...");
     ram_slice.fill(0x00);
     info!("Done!");
-
 
     // Safe: This is an STM32L072, which has a Cortex-M0+ with MPU.
     let mut cp = cortex_m::Peripherals::take().unwrap();
@@ -644,11 +649,11 @@ struct ARGB8888 {
 }
 
 impl ARGB8888 {
-    const fn new(a: u8, r: u8, g: u8, b: u8) -> Self {
+    pub const fn new(a: u8, r: u8, g: u8, b: u8) -> Self {
         Self { b, g, r, a }
     }
 
-    const fn new_rgb(r: u8, g: u8, b: u8) -> Self {
+    pub const fn new_rgb(r: u8, g: u8, b: u8) -> Self {
         Self::new(0xFF, r, g, b)
     }
 }
@@ -680,7 +685,7 @@ struct RGB888 {
 }
 
 impl RGB888 {
-    const fn new(r: u8, g: u8, b: u8) -> Self {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { b, g, r }
     }
 }

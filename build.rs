@@ -24,7 +24,8 @@ fn main() {
     println!("cargo:rerun-if-changed=memory.x");
 
     let config = slint_build::CompilerConfiguration::new()
-        .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer);
+        .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer)
+        .with_style("material".into());
     slint_build::compile_with_config("ui/dislodged.slint", config).unwrap();
     slint_build::print_rustc_flags().unwrap();
 }

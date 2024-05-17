@@ -5,15 +5,9 @@
 use stm32_fmc::{SdramChip, SdramConfiguration, SdramTiming};
 
 const BURST_LENGTH_1: u16 = 0x0000;
-const BURST_LENGTH_2: u16 = 0x0001;
-const BURST_LENGTH_4: u16 = 0x0002;
-const BURST_LENGTH_8: u16 = 0x0004;
 const BURST_TYPE_SEQUENTIAL: u16 = 0x0000;
-const BURST_TYPE_INTERLEAVED: u16 = 0x0008;
-const CAS_LATENCY_2: u16 = 0x0020;
 const CAS_LATENCY_3: u16 = 0x0030;
 const OPERATING_MODE_STANDARD: u16 = 0x0000;
-const WRITEBURST_MODE_PROGRAMMED: u16 = 0x0000;
 const WRITEBURST_MODE_SINGLE: u16 = 0x0200;
 
 /// Is42s32400f with Speed Grade 6

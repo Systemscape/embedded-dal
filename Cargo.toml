@@ -56,7 +56,6 @@ cortex-m = { version = "0.7.6", features = [
 cortex-m-rt = "0.7.0"
 
 num_enum = { version = "0.7", default-features = false }
-cortex-mpu = "0.4.0"
 
 [build-dependencies]
 slint-build = "1.6"
