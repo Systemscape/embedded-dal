@@ -44,7 +44,7 @@ component OverviewButton inherits Rectangle {
         }
 
         icon := Image {
-            width: 40px;
+            width: GlobalSettings.OverviewIconWidth;
         }
     }
 }
@@ -61,8 +61,7 @@ export component DashboardPage inherits Page {
                 Row {
                     OverviewButton {
                         text: "Total:\n1000";
-                        //icon: @image-url("../icons/circle-info.svg");
-                        icon: @image-url("../icons/circle-check.svg");
+                        icon: @image-url("../icons/circle-info.svg");
                         icon_color: blue;
                     }
 
@@ -74,8 +73,7 @@ export component DashboardPage inherits Page {
 
                     OverviewButton {
                         text: "Failed:\n456";
-                        //icon: @image-url("../icons/circle-xmark.svg");
-                        icon: @image-url("../icons/circle-check.svg");
+                        icon: @image-url("../icons/circle-xmark.svg");
                         icon_color: red;
                     }
                 }
@@ -83,8 +81,7 @@ export component DashboardPage inherits Page {
                 Row {
                     OverviewButton {
                         text: "Pending:\n10";
-                        //icon: @image-url("../icons/hourglass-half.svg");
-                        icon: @image-url("../icons/circle-stop.svg");
+                        icon: @image-url("../icons/hourglass-half.svg");
                         icon_color: gray;
                     }
                     OverviewButton {
@@ -94,8 +91,7 @@ export component DashboardPage inherits Page {
                     }
                     OverviewButton {
                         text: "Balance:\n" + GlobalSettings.balance + " €";
-                        //icon: @image-url("../icons/credit-card.svg");
-                        icon: @image-url("../icons/circle-stop.svg");
+                        icon: @image-url("../icons/credit-card.svg");
                         icon_color: darkblue;
                         page: 8;
                     }
