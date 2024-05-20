@@ -4,9 +4,10 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-arg-bins=--nmagic");
-    println!("cargo:rustc-link-arg-bins=-Tlink.x");
-    println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
+    // put in .cargo/config.toml
+    //println!("cargo:rustc-link-arg-bins=--nmagic");
+    //println!("cargo:rustc-link-arg-bins=-Tlink.x");
+    //println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
     // Put `memory.x` in our output directory and ensure it's
     // on the linker search path.
@@ -28,4 +29,6 @@ fn main() {
         .with_style("material".into());
     slint_build::compile_with_config("ui/display_mock.slint", config).unwrap();
     slint_build::print_rustc_flags().unwrap();
+
+    println!("cargo:EMBED_TEXTURES=1");
 }

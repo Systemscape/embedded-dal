@@ -7,7 +7,6 @@ MEMORY
     SDRAM : ORIGIN = 0xC0000000, LENGTH = 16M
 }
 
-
 _stack_start = ORIGIN(RAM) + LENGTH(RAM);
 
 
@@ -24,16 +23,16 @@ SECTIONS {
        . = ALIGN(4);
      } > QSPI
 
-/*
      .slint_assets : {
        . = ALIGN(4);
       __s_slint_assets = .;
        *(.slint_assets);
        . = ALIGN(4);
-     } > SDRAM  AT>OSPI_ROM
+     } > SDRAM  AT>QSPI
 
     __e_slint_assets = .;
     __si_slint_assets = LOADADDR(.slint_assets);
-    */
+
 }
+
 

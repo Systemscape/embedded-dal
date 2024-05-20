@@ -7,6 +7,7 @@ use alloc::rc::Rc;
 
 use cortex_m::peripheral::SCB;
 
+use embassy_time::Duration;
 use embedded_dal::{
     config::{Dimensions, Orientation},
     drivers::{
@@ -22,10 +23,24 @@ use core::cell::RefCell;
 
 use defmt::*;
 use embassy_stm32::{
-    exti::ExtiInput, gpio::{Level, Output, Speed}, i2c::I2c, ltdc::Ltdc, mode::Blocking, pac::{
+    exti::ExtiInput,
+    gpio::{Level, Output, Speed},
+    i2c::I2c,
+    ltdc::Ltdc,
+    mode::Blocking,
+    pac::{
         ltdc::vals::{Depol, Hspol, Pcpol, Pf, Vspol},
         LTDC,
-    }, peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5}, qspi::{enums::{AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth}, Config, TransferConfig}, rcc::{Hse, HseMode, Pll}, time::{mhz, Hertz}
+    },
+    peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5},
+    qspi::{
+        enums::{
+            AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth,
+        },
+        Config, TransferConfig,
+    },
+    rcc::{Hse, HseMode, Pll},
+    time::{mhz, Hertz},
 };
 use embassy_stm32::{
     gpio::Pull,
@@ -61,13 +76,8 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
 }; NUM_PIXELS];
 
 #[link_section = ".qspi_flash"]
-static mut TEST_QSPI: [TargetPixel; NUM_PIXELS] = [TargetPixel {
-    a: 0x01,
-    r: 0x23,
-    g: 0x45,
-    b: 0x67,
-}; NUM_PIXELS];
-
+#[allow(dead_code)]
+static mut QSPI_FLASH: [u8; 8] = [0x01,0x02,0x03,0x4,0x5,0x6,0x7,0x8];
 
 use embedded_alloc::Heap;
 
@@ -605,17 +615,22 @@ async fn main(_spawner: Spawner) {
     ram_slice.fill(0x00);
     info!("Done!");
 
+
     let config = Config {
         memory_size: MemorySize::_128MiB,
-        address_size: AddressSize::_32bit,
-        prescaler: 16,
-        cs_high_time: ChipSelectHighTime::_1Cycle,
-        fifo_threshold: FIFOThresholdLevel::_16Bytes,
+        address_size: AddressSize::_24bit, // 24 bit according to STM32469discovery BSP
+        prescaler: 1, // Max 90 MHz. QSPI is on AHB3 and that is set to 180 MHz so divided by 2 that's 90 MHz. TODO: Make this depend on the actualy frequency? How to obtain it from embassy?
+        cs_high_time: ChipSelectHighTime::_5Cycle, // 5 cycles according to STM32469discovery BSP
+        fifo_threshold: FIFOThresholdLevel::_1Bytes, // 1 byte according to STM32469discovery BSP
     };
 
-    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bk1(p.QUADSPI, p.PF8, p.PF9, p.PF7, p.PF6, p.PF10, p.PB6, p.DMA2_CH7, config);
+    // MT25QL128ABA1EW9-0SIT according to schetmatic
+    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bk1(
+        p.QUADSPI, p.PF8, p.PF9, p.PF7, p.PF6, p.PF10, p.PB6, p.DMA2_CH7, config,
+    );
 
-    let transaction = TransferConfig {
+    let mut buf = [0u8; 8];
+    let mut transaction = TransferConfig {
         iwidth: QspiWidth::SING,
         awidth: QspiWidth::SING,
         dwidth: QspiWidth::QUAD,
@@ -623,16 +638,63 @@ async fn main(_spawner: Spawner) {
         address: Some(0x00000000),
         dummy: DummyCycles::_8,
     };
-
-    let mut buf = [0u8;32];
     qspi_flash.blocking_read(&mut buf, transaction);
 
-    warn!("Read bytes: {:#?}", buf);
+    warn!("Read QSPI bytes: {:#?}", buf);
+
+    embassy_time::block_for(Duration::from_millis(2000));
 
 
+    extern "C" {
+        static mut __s_slint_assets: u8;
+        static __e_slint_assets: u8;
+        static __si_slint_assets: u8;
+    }
 
+    unsafe {
+        warn!(
+            "__s_slint_assets: {:x}",
+            core::ptr::addr_of!(__s_slint_assets) as usize
+        );
+        warn!(
+            "__e_slint_assets: {:x}",
+            core::ptr::addr_of!(__e_slint_assets) as usize
+        );
+        warn!(
+            "__si_slint_assets: {:#x}",
+            core::ptr::addr_of!(__si_slint_assets) as usize
+        );
 
-    // Safe: This is an STM32L072, which has a Cortex-M0+ with MPU.
+        let asset_mem_slice = core::slice::from_raw_parts_mut(
+            core::ptr::addr_of_mut!(__s_slint_assets),
+            core::ptr::addr_of!(__e_slint_assets) as usize
+                - core::ptr::addr_of!(__s_slint_assets) as usize,
+        );
+
+        let mut asset_flash_addr =
+        core::ptr::addr_of!(__si_slint_assets) as usize - 0x9000_0000;
+
+        defmt::assert!(asset_mem_slice.len() > 0);
+
+        for chunk in asset_mem_slice.chunks_mut(32) {
+            let mut transaction = TransferConfig {
+                iwidth: QspiWidth::SING,
+                awidth: QspiWidth::SING,
+                dwidth: QspiWidth::QUAD,
+                instruction: 0x6B,
+                address: Some(asset_flash_addr as u32),
+                dummy: DummyCycles::_8,
+            };
+
+            qspi_flash.blocking_read(chunk, transaction);
+
+            asset_flash_addr += chunk.len();
+        }
+
+        let qspi_flash_tmp = &mut *core::ptr::addr_of_mut!(QSPI_FLASH);
+
+    }
+
     let mut cp = cortex_m::Peripherals::take().unwrap();
     cp.SCB.disable_dcache(&mut cp.CPUID);
 

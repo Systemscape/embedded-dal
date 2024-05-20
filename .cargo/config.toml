@@ -1,9 +1,18 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # replace STM32F429ZITx with your chip as listed in `probe-rs chip list`
-runner = "probe-rs run --chip STM32F469NIHx"# --chip-description-path ./STM32F4.yml"
+runner = "probe-rs run --chip STM32F469NIHx --chip-description-path ./STM32F4.yml"
+
+rustflags = [
+  #"-C", "linker=flip-link",
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
 
 [build]
 target = "thumbv7em-none-eabi"
 
 [env]
-DEFMT_LOG = "info"
+DEFMT_LOG = "infro"
+SLINT_ASSET_SECTION = ".slint_assets"
