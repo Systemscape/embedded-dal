@@ -1,6 +1,6 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # replace STM32F429ZITx with your chip as listed in `probe-rs chip list`
-runner = "probe-rs run --chip STM32F469NIHx"
+runner = "probe-rs run --chip STM32F469NIHx"# --chip-description-path ./STM32F4.yml"
 
 [build]
 target = "thumbv7em-none-eabi"

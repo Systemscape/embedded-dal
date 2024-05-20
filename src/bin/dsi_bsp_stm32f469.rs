@@ -22,18 +22,10 @@ use core::cell::RefCell;
 
 use defmt::*;
 use embassy_stm32::{
-    exti::ExtiInput,
-    gpio::{Level, Output, Speed},
-    i2c::I2c,
-    ltdc::Ltdc,
-    mode::Blocking,
-    pac::{
+    exti::ExtiInput, gpio::{Level, Output, Speed}, i2c::I2c, ltdc::Ltdc, mode::Blocking, pac::{
         ltdc::vals::{Depol, Hspol, Pcpol, Pf, Vspol},
         LTDC,
-    },
-    peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5},
-    rcc::{Hse, HseMode, Pll},
-    time::{mhz, Hertz},
+    }, peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5}, qspi::{enums::{AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth}, Config, TransferConfig}, rcc::{Hse, HseMode, Pll}, time::{mhz, Hertz}
 };
 use embassy_stm32::{
     gpio::Pull,
@@ -67,6 +59,15 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     g: 0,
     b: 0,
 }; NUM_PIXELS];
+
+#[link_section = ".qspi_flash"]
+static mut TEST_QSPI: [TargetPixel; NUM_PIXELS] = [TargetPixel {
+    a: 0x01,
+    r: 0x23,
+    g: 0x45,
+    b: 0x67,
+}; NUM_PIXELS];
+
 
 use embedded_alloc::Heap;
 
@@ -603,6 +604,33 @@ async fn main(_spawner: Spawner) {
     info!("Erasing RAM...");
     ram_slice.fill(0x00);
     info!("Done!");
+
+    let config = Config {
+        memory_size: MemorySize::_128MiB,
+        address_size: AddressSize::_32bit,
+        prescaler: 16,
+        cs_high_time: ChipSelectHighTime::_1Cycle,
+        fifo_threshold: FIFOThresholdLevel::_16Bytes,
+    };
+
+    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bk1(p.QUADSPI, p.PF8, p.PF9, p.PF7, p.PF6, p.PF10, p.PB6, p.DMA2_CH7, config);
+
+    let transaction = TransferConfig {
+        iwidth: QspiWidth::SING,
+        awidth: QspiWidth::SING,
+        dwidth: QspiWidth::QUAD,
+        instruction: 0x6B,
+        address: Some(0x00000000),
+        dummy: DummyCycles::_8,
+    };
+
+    let mut buf = [0u8;32];
+    qspi_flash.blocking_read(&mut buf, transaction);
+
+    warn!("Read bytes: {:#?}", buf);
+
+
+
 
     // Safe: This is an STM32L072, which has a Cortex-M0+ with MPU.
     let mut cp = cortex_m::Peripherals::take().unwrap();

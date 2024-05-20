@@ -1,0 +1,40 @@
+import { ScrollView } from "std-widgets.slint";
+
+component SideBarItem inherits Rectangle {
+    min-height: state.preferred-height;
+
+    states [
+        pressed when touch.pressed: {
+            state.opacity: 0.2;
+        }
+        hover when touch.has-hover: {
+            state.opacity: 0.4;
+        }
+    ]
+    state := Rectangle {
+        opacity: 0;
+        background: black;
+        height: 20px;
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+    }
+}
+
+export component Demo {
+    height: 200px;
+    width: 300px;
+    ScrollView {
+        VerticalLayout {
+            SideBarItem { }
+            SideBarItem { }
+            SideBarItem { }
+            SideBarItem { }
+            SideBarItem { }
+            SideBarItem { }
+            SideBarItem { }
+        }
+    }
+}
