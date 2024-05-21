@@ -429,9 +429,9 @@ impl slint::platform::Platform for StmBackend<'_> {
                     window.dispatch_event(event);
 
                     // removes hover state on widgets
-                    //if is_pointer_release_event {
-                    //    window.dispatch_event(slint::platform::WindowEvent::PointerExited);
-                    //}
+                    if is_pointer_release_event {
+                        window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+                    }
                 }
             }
 

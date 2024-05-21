@@ -71,21 +71,32 @@ export component NavButton {
 
 export component NumericSetting {
     in property <string> unit: "°C";
+    in property <image> icon <=> icon.source;
+    in-out property <int> value: 93;
 
-    out property <int> value: 93;
-
-    width: 300px;
+    preferred-width: 400px;
     height: 70px;
 
     HorizontalLayout {
-        alignment: center;
+        alignment: space-between;
+        icon := Image {
+            vertical-alignment: center;
+            height: 75px;
+            width: 70px;
+            y: parent.height / 2 - self.height / 2;
+
+            image-fit: ImageFit.contain;
+        }
+
+        Rectangle {
+            width: 50px;
+        }
+
         Image {
-            source: @image-url("icons/circle-check.svg");
+            source: @image-url("icons/numeric_arrow_left.svg");
+            width: 28px;
             TouchArea {
                 clicked => {
-                    value = value - 1;
-                }
-                double-clicked => {
                     value = value - 1;
                 }
             }
@@ -94,18 +105,16 @@ export component NumericSetting {
         Text {
             horizontal-alignment: center;
             vertical-alignment: center;
-            width: 200px;
+            width: 300px;
             text: value + " " + unit;
             font-size: 40px;
         }
 
         Image {
-            source: @image-url("icons/circle-check.svg");
+            source: @image-url("icons/numeric_arrow_right.svg");
+            width: 28px;
             TouchArea {
                 clicked => {
-                    value = value + 1;
-                }
-                double-clicked => {
                     value = value + 1;
                 }
             }
@@ -139,38 +148,90 @@ export component MainWindow inherits Window {
 
     VerticalLayout {
         // Settings page
-        HorizontalLayout {
+        Rectangle {
             height: 370px;
+            width: 290px;
+
+            Rectangle {
+                height: 90%;
+                width: 90%;
+                border-color: black;
+                border-width: 2px;
+                //background: black.transparentize(80%);
+                background: Colors.lightgray.transparentize(50%);
 
             VerticalLayout {
-                spacing: 45px;
-                NumericSetting { }
-                NumericSetting { }
-                NumericSetting { }
+                //padding: 30px;
+                alignment: center;
+                spacing: 30px;
+                Image {
+                    x: parent.x + parent.width/2 - self.width/2;
+                    source: @image-url("icons/gear.svg");
+                    height: 200px;
+                    width: 200px;
+                    colorize: Colors.brown;
+                }
+
+                Text {
+                    text: "Manual";
+                    horizontal-alignment: center;
+                    //horizontal-alignment: center;
+                    font-size: 30px;
+                }
+
+            }
+        }
+
+            VerticalLayout {
+                x: 310px;
+                spacing: 40px;
+                alignment: space-around;
+
+                temperature := NumericSetting {
+                    icon: @image-url("icons/thermometer.svg");
+                }
+
+                weight := NumericSetting {
+                    icon: @image-url("icons/two_coffee_beans.svg");
+                    unit: "g";
+                    value: 15;
+                }
+
+                volume := NumericSetting {
+                    icon: @image-url("icons/measurement_cup.svg");
+                    unit: "ml";
+                    value: 170;
+                }
             }
         }
 
         // Back and Start menu
         HorizontalLayout {
-            height: 110px;
+            //height: 100px;
             width: 800px;
             alignment: space-between;
-            padding: 5px;
+            padding: 10px;
 
             // Back button
             // Start Button
             back-btn := NavButton {
                 text: "Back";
-                icon: @image-url("icons/arrow-right-long.svg");
-                height: 100px;
+                icon: @image-url("icons/arrow_back.svg");
+                height: 90px;
                 width: 250px;
+
+                clicked => {
+                    temperature.value = 93;
+                    weight.value = 15;
+                    volume.value = 170;
+                }
             }
 
             // Start Button
             start-btn := NavButton {
                 text: "Start";
-                icon: @image-url("icons/arrow-right-long.svg");
-                height: 100px;
+                icon: @image-url("icons/play_button.svg");
+                height: 90px;
                 width: 250px;
                 icon-right: true;
             }
