@@ -20,7 +20,7 @@ stm32f469 = ["dep:embedded-alloc"]
 
 
 [dependencies]
-embassy-stm32 = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = [
+embassy-stm32 = { git = "https://github.com/Systemscape/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = [
     "defmt",
     "stm32f469ni",
     "unstable-pac",
@@ -28,13 +28,13 @@ embassy-stm32 = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5
     "exti",
     "chrono",
 ] }
-embassy-time = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = [
+embassy-time = { git = "https://github.com/Systemscape/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
 
-embassy-executor = { git = "https://github.com/Systemscape/embassy.git", rev = "5e5bc37db800fcf8234bcc2f846d486a890810ff", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
+embassy-executor = { git = "https://github.com/Systemscape/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
 
 embedded-hal = "1.0.0"
 

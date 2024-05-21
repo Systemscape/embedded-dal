@@ -32,7 +32,6 @@ SECTIONS {
 
     __e_slint_assets = .;
     __si_slint_assets = LOADADDR(.slint_assets);
-
 }
 
 

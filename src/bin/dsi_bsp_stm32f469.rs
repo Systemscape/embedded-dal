@@ -92,8 +92,6 @@ struct StmBackendInner<'a> {
     delay: embassy_time::Delay,
     reset: Output<'a>,
     touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
-    //fb1: &'a mut [TargetPixel; NUM_PIXELS],
-    //fb2: &'a mut [TargetPixel; NUM_PIXELS],
 }
 
 struct StmBackend<'a> {
@@ -114,8 +112,6 @@ impl<'a> StmBackend<'a> {
         pj5: PJ5,
         ph7: PH7,
         exti5: EXTI5,
-        //fb1: &'a mut [TargetPixel; NUM_PIXELS],
-        //fb2: &'a mut [TargetPixel; NUM_PIXELS],
         scb: SCB,
     ) -> Self {
         /*
@@ -392,7 +388,7 @@ impl slint::platform::Platform for StmBackend<'_> {
 
             if let Some(window) = self.window.borrow().clone() {
                 window.draw_if_needed(|renderer| {
-                    info!("start rendering");
+                    debug!("start rendering");
                     renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
@@ -416,24 +412,6 @@ impl slint::platform::Platform for StmBackend<'_> {
                         //info!("Got Touch: {:#?}", state);
                         Some(match last_touch.replace(position) {
                             Some(_) => slint::platform::WindowEvent::PointerMoved { position },
-                            /*
-                            Some(pos_old) => {
-                                if (position.x != pos_old.x) || (position.y != pos_old.y) {
-                                    warn!(
-                                        "Sending pointer scrolled: dx {}, dy {}",
-                                        position.x - pos_old.x,
-                                        position.y - pos_old.y
-                                    );
-                                    slint::platform::WindowEvent::PointerScrolled {
-                                        position: position,
-                                        delta_x: pos_old.x - position.x,
-                                        delta_y: pos_old.y - position.y,
-                                    }
-                                } else {
-                                    slint::platform::WindowEvent::PointerMoved { position }
-                                }
-                            }
-                            */
                             None => {
                                 slint::platform::WindowEvent::PointerPressed { position, button }
                             }
@@ -451,10 +429,9 @@ impl slint::platform::Platform for StmBackend<'_> {
                     window.dispatch_event(event);
 
                     // removes hover state on widgets
-                    if is_pointer_release_event {
-                        warn!("Send PointerExited Event!");
-                        window.dispatch_event(slint::platform::WindowEvent::PointerExited);
-                    }
+                    //if is_pointer_release_event {
+                    //    window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+                    //}
                 }
             }
 

@@ -14,5 +14,5 @@ rustflags = [
 target = "thumbv7em-none-eabi"
 
 [env]
-DEFMT_LOG = "infro"
+DEFMT_LOG = "info"
 SLINT_ASSET_SECTION = ".slint_assets"

@@ -661,7 +661,7 @@ checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 [[package]]
 name = "embassy-embedded-hal"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "defmt",
  "embassy-futures",
@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "embassy-executor"
 version = "0.5.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "cortex-m",
  "critical-section",
@@ -692,7 +692,7 @@ dependencies = [
 [[package]]
 name = "embassy-executor-macros"
 version = "0.4.1"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -703,12 +703,12 @@ dependencies = [
 [[package]]
 name = "embassy-futures"
 version = "0.1.1"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 
 [[package]]
 name = "embassy-hal-internal"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "cortex-m",
  "critical-section",
@@ -719,7 +719,7 @@ dependencies = [
 [[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "defmt",
 ]
@@ -727,7 +727,7 @@ dependencies = [
 [[package]]
 name = "embassy-stm32"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "bit_field",
  "bitflags 2.5.0",
@@ -746,6 +746,7 @@ dependencies = [
  "embassy-time",
  "embassy-time-driver",
  "embassy-usb-driver",
+ "embassy-usb-synopsys-otg",
  "embedded-can",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
@@ -755,7 +756,7 @@ dependencies = [
  "embedded-io-async",
  "embedded-storage",
  "embedded-storage-async",
- "futures",
+ "futures-util",
  "nb 1.1.0",
  "proc-macro2",
  "quote",
@@ -771,7 +772,7 @@ dependencies = [
 [[package]]
 name = "embassy-sync"
 version = "0.5.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -784,7 +785,7 @@ dependencies = [
 [[package]]
 name = "embassy-time"
 version = "0.3.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -802,7 +803,7 @@ dependencies = [
 [[package]]
 name = "embassy-time-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "document-features",
 ]
@@ -810,14 +811,24 @@ dependencies = [
 [[package]]
 name = "embassy-time-queue-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 
 [[package]]
 name = "embassy-usb-driver"
 version = "0.1.0"
-source = "git+https://github.com/Systemscape/embassy.git?rev=5e5bc37db800fcf8234bcc2f846d486a890810ff#5e5bc37db800fcf8234bcc2f846d486a890810ff"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
 dependencies = [
  "defmt",
+]
+
+[[package]]
+name = "embassy-usb-synopsys-otg"
+version = "0.1.0"
+source = "git+https://github.com/Systemscape/embassy.git?rev=daaaf50298144a245d026e70f4fa3c6eb856276a#daaaf50298144a245d026e70f4fa3c6eb856276a"
+dependencies = [
+ "critical-section",
+ "embassy-sync",
+ "embassy-usb-driver",
 ]
 
 [[package]]
@@ -1089,57 +1100,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "futures"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "645c6916888f6cb6350d2550b80fb63e734897a8498abe35cfb732b6487804b0"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-io",
- "futures-sink",
- "futures-task",
- "futures-util",
-]
-
-[[package]]
-name = "futures-channel"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac8f7d7865dcb88bd4373ab671c8cf4508703796caa2b1985a9ca867b3fcb78"
-dependencies = [
- "futures-core",
- "futures-sink",
-]
-
-[[package]]
 name = "futures-core"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfc6580bb841c5a68e9ef15c77ccc837b40a7504914d52e47b8b0e9bbda25a1d"
-
-[[package]]
-name = "futures-io"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a44623e20b9681a318efdd71c299b6b222ed6f231972bfe2f224ebad6311f0c1"
-
-[[package]]
-name = "futures-macro"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.63",
-]
-
-[[package]]
-name = "futures-sink"
-version = "0.3.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fb8e00e87438d937621c1c6269e53f536c14d3fbd6a042bb24879e57d474fb5"
 
 [[package]]
 name = "futures-task"
@@ -1154,8 +1118,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d6401deb83407ab3da39eba7e33987a73c3df0c82b4bb5813ee871c19c41d48"
 dependencies = [
  "futures-core",
- "futures-macro",
- "futures-sink",
  "futures-task",
  "pin-project-lite",
  "pin-utils",
@@ -2382,7 +2344,7 @@ dependencies = [
 [[package]]
 name = "stm32-metapac"
 version = "15.0.0"
-source = "git+https://github.com/embassy-rs/stm32-data-generated?tag=stm32-data-8ee7107b6d708f92d6226b14f598ee62929f5d67#1f213612724dcd37f5caaefc19bb1a70560196e5"
+source = "git+https://github.com/embassy-rs/stm32-data-generated?tag=stm32-data-f1297385e91f061fcb6134bb25f51e12d8abff93#acfef07196084706a9621a434d927229b616951f"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
