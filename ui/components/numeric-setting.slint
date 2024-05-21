@@ -1,0 +1,59 @@
+export component NumericSetting {
+    in property <string> unit: "°C";
+    in property <image> icon <=> icon.source;
+    in-out property <int> value: 93;
+
+    preferred-width: 400px;
+    height: 70px;
+
+    HorizontalLayout {
+        //alignment: space-between;
+        icon := Image {
+            //vertical-alignment: center;
+            height: root.height;
+            //min-width: 10px;
+            width: 70px;
+            y: parent.height / 2 - self.height / 2;
+
+            image-fit: ImageFit.contain;
+        }
+
+        Rectangle {
+            width: 30px;
+        }
+
+        Image {
+            source: @image-url("../icons/numeric_arrow_left.svg");
+            width: 35px;
+            TouchArea {
+                // make it easier to hit that button!
+                x: -20px;
+                width: parent.width + 40px;
+                clicked => {
+                    value = value - 1;
+                }
+            }
+        }
+
+        Text {
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            width: 300px;
+            text: value + " " + unit;
+            font-size: 50px;
+        }
+
+        Image {
+            source: @image-url("../icons/numeric_arrow_right.svg");
+            width: 35px;
+            TouchArea {
+                // make it easier to hit that button!
+                x: -20px;
+                width: parent.width + 40px;
+                clicked => {
+                    value = value + 1;
+                }
+            }
+        }
+    }
+}

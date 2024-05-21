@@ -1,0 +1,62 @@
+import { NumericSetting } from "../components/numeric-setting.slint";
+import { NavButton } from "../components/nav-button.slint";
+import { Page } from "page.slint";
+
+export component ManualBrewScreen inherits Page {
+
+    Rectangle {
+        height: 370px;
+        width: 290px;
+
+        Rectangle {
+            height: 90%;
+            width: 90%;
+            border-color: black;
+            border-width: 2px;
+            //background: black.transparentize(80%);
+                background: Colors.lightgray.transparentize(50%);
+
+            VerticalLayout {
+                //padding: 30px;
+                alignment: center;
+                spacing: 30px;
+                Image {
+                    x: parent.x + parent.width / 2 - self.width / 2;
+                    source: @image-url("../icons/gear.svg");
+                    height: 200px;
+                    width: 200px;
+                    colorize: Colors.brown;
+                }
+
+                Text {
+                    text: "Manual";
+                    horizontal-alignment: center;
+                    //horizontal-alignment: center;
+                    font-size: 30px;
+                }
+            }
+        }
+
+        VerticalLayout {
+            x: 310px;
+            spacing: 40px;
+            alignment: space-around;
+
+            temperature := NumericSetting {
+                icon: @image-url("../icons/thermometer.svg");
+            }
+
+            weight := NumericSetting {
+                icon: @image-url("../icons/two_coffee_beans.svg");
+                unit: "g";
+                value: 15;
+            }
+
+            volume := NumericSetting {
+                icon: @image-url("../icons/measurement_cup.svg");
+                unit: "ml";
+                value: 170;
+            }
+        }
+    }
+}
