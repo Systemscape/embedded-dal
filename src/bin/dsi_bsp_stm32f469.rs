@@ -57,7 +57,7 @@ const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
 const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
     * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
 
-pub type TargetPixel = ARGB8888;
+pub type TargetPixel = embedded_dal::pixels::ARGB8888;
 
 #[link_section = ".frame_buffer"]
 static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
@@ -75,9 +75,6 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     b: 0,
 }; NUM_PIXELS];
 
-#[link_section = ".qspi_flash"]
-#[allow(dead_code)]
-static mut QSPI_FLASH: [u8; 8] = [0x01,0x02,0x03,0x4,0x5,0x6,0x7,0x8];
 
 use embedded_alloc::Heap;
 
@@ -89,8 +86,8 @@ static ALLOCATOR: Heap = Heap::empty();
 
 struct StmBackendInner<'a> {
     scb: cortex_m::peripheral::SCB,
-    delay: embassy_time::Delay,
-    reset: Output<'a>,
+    /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
+    _reset: Output<'a>,
     touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
 }
 
@@ -133,7 +130,7 @@ impl<'a> StmBackend<'a> {
         // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
         //embassy_time::block_for(embassy_time::Duration::from_millis(160));
 
-        let mut i2c = embassy_stm32::i2c::I2c::new_blocking(
+        let i2c = embassy_stm32::i2c::I2c::new_blocking(
             i2c1,
             pb8,
             pb9,
@@ -341,8 +338,7 @@ impl<'a> StmBackend<'a> {
             exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
             inner: RefCell::new(StmBackendInner {
                 scb: scb,
-                delay: embassy_time::Delay,
-                reset,
+                _reset: reset,
                 touch_screen,
             }),
         }
@@ -554,12 +550,9 @@ async fn main(_spawner: Spawner) {
 
     // It has 128 Mbit / 16 MByte of RAM. 4 banks, 1M (=1024 K) x 32 bits
     // STM32F469 DISCO has 4096 rows by 256 columns by 32 bits on 4 banks
-    //let sdram_size = 4096 * 256 * 4 * 4;
-    let sdram_size = 4096 * 256 * 4;
+    let sdram_size = 4096 * 256 * 4 * 4;
 
-    let mut delay = embassy_time::Delay;
-
-    let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
+    let ram_ptr: *mut u32 = sdram.init(&mut embassy_time::Delay) as *mut _;
 
     let ram_slice = unsafe {
         info!("RAM ADDR: {:x}", ram_ptr as u32);
@@ -572,21 +565,18 @@ async fn main(_spawner: Spawner) {
     // // Use memory in SDRAM
     info!("RAM contents before writing: {:x}", ram_slice[..10]);
 
-    ram_slice[..10].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    ram_slice[ram_slice.len() - 1] = 5;
+    let test_slice: &[u32; 10] = &[1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-    let test_slice = &[1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    ram_slice[..10].copy_from_slice(test_slice);
+    ram_slice[ram_slice.len() - 1] = 0x12; // Ensure we can write until the end
 
+  
     info!("RAM contents after writing: {:x}", unsafe {
-        core::ptr::read_volatile(ram_slice[..200].as_ptr() as *const [u32; 200])
+        core::ptr::read_volatile(ram_slice[..20].as_ptr() as *const [u32; 20])
     });
 
-    info!("Test Slice: {:x}", unsafe {
-        core::ptr::read_volatile(test_slice[..10].as_ptr() as *const [u32; 10])
-    });
-
-    crate::assert_eq!(ram_slice[0], 1);
-    crate::assert_eq!(ram_slice[ram_slice.len() - 1], 5);
+    crate::assert_eq!(ram_slice[..10], test_slice[..10]);
+    crate::assert_eq!(ram_slice[ram_slice.len() - 1], 0x12); // Ensure we can read until the end
 
     info!("Erasing RAM...");
     ram_slice.fill(0x00);
@@ -607,7 +597,7 @@ async fn main(_spawner: Spawner) {
     );
 
     let mut buf = [0u8; 8];
-    let mut transaction = TransferConfig {
+    let transaction = TransferConfig {
         iwidth: QspiWidth::SING,
         awidth: QspiWidth::SING,
         dwidth: QspiWidth::QUAD,
@@ -654,7 +644,7 @@ async fn main(_spawner: Spawner) {
         defmt::assert!(asset_mem_slice.len() > 0);
 
         for chunk in asset_mem_slice.chunks_mut(32) {
-            let mut transaction = TransferConfig {
+            let transaction = TransferConfig {
                 iwidth: QspiWidth::SING,
                 awidth: QspiWidth::SING,
                 dwidth: QspiWidth::QUAD,
@@ -667,8 +657,6 @@ async fn main(_spawner: Spawner) {
 
             asset_flash_addr += chunk.len();
         }
-
-        let qspi_flash_tmp = &mut *core::ptr::addr_of_mut!(QSPI_FLASH);
 
     }
 
@@ -704,68 +692,3 @@ async fn main(_spawner: Spawner) {
 }
 
 slint::include_modules!();
-
-#[repr(C)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Copy, Debug, Default)]
-struct ARGB8888 {
-    b: u8,
-    g: u8,
-    r: u8,
-    a: u8,
-}
-
-impl ARGB8888 {
-    pub const fn new(a: u8, r: u8, g: u8, b: u8) -> Self {
-        Self { b, g, r, a }
-    }
-
-    pub const fn new_rgb(r: u8, g: u8, b: u8) -> Self {
-        Self::new(0xFF, r, g, b)
-    }
-}
-
-use slint::platform::software_renderer::PremultipliedRgbaColor;
-
-impl slint::platform::software_renderer::TargetPixel for ARGB8888 {
-    fn blend(&mut self, color: PremultipliedRgbaColor) {
-        let a = (u8::MAX - color.alpha) as u16;
-        self.r = (self.r as u16 * a / 255) as u8 + color.red;
-        self.g = (self.g as u16 * a / 255) as u8 + color.green;
-        self.b = (self.b as u16 * a / 255) as u8 + color.blue;
-        self.a = 0xFF;
-    }
-
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-        Self::new(0xFF, r, g, b)
-    }
-}
-
-//#[repr(packed(1))]
-#[repr(align(1))]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(Clone, Copy, Debug, Default)]
-struct RGB888 {
-    b: u8,
-    g: u8,
-    r: u8,
-}
-
-impl RGB888 {
-    pub const fn new(r: u8, g: u8, b: u8) -> Self {
-        Self { b, g, r }
-    }
-}
-
-impl slint::platform::software_renderer::TargetPixel for RGB888 {
-    fn blend(&mut self, color: PremultipliedRgbaColor) {
-        let a = (u8::MAX - color.alpha) as u16;
-        self.r = (self.r as u16 * a / 255) as u8 + color.red;
-        self.g = (self.g as u16 * a / 255) as u8 + color.green;
-        self.b = (self.b as u16 * a / 255) as u8 + color.blue;
-    }
-
-    fn from_rgb(r: u8, g: u8, b: u8) -> Self {
-        Self::new(r, g, b)
-    }
-}

@@ -17,6 +17,10 @@ SECTIONS {
        . = ALIGN(4);
      } > SDRAM
 
+    /*
+      May be used for testing, i.e., writing a static variable to the flash and reading it later on.
+      Make sure to use that static somewhere in the code to ensure it is not optimized away. Maybe confirm with cargo binutils (size, objdump).
+    */
     .qspi_flash : {
        . = ALIGN(4);
        *(.qspi_flash);

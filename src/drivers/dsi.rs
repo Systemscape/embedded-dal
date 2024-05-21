@@ -82,7 +82,7 @@ impl Config {
         let height = LCD_DIMENSIONS.get_height(orientation);
 
         const DSI_PIXELFORMAT_RGB888: u8 = 0x05;
-        const DSI_PIXELFORMAT_ARGB888: u8 = 0x00;
+        //const DSI_PIXELFORMAT_ARGB888: u8 = 0x00; // Not sure when this would be used. LTDC output RGB888 only anyway.
 
         Self {
             width,
