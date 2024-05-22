@@ -13,7 +13,7 @@ use embedded_dal::{
     drivers::{
         dsi::{self, Dsi},
         ft6x36::Ft6x36,
-        ltdc,
+        ltdc::{self, Ltdc},
     },
 };
 
@@ -26,12 +26,7 @@ use embassy_stm32::{
     exti::ExtiInput,
     gpio::{Level, Output, Speed},
     i2c::I2c,
-    ltdc::Ltdc,
     mode::Blocking,
-    pac::{
-        ltdc::vals::{Depol, Hspol, Pcpol, Pf, Vspol},
-        LTDC,
-    },
     peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
@@ -89,6 +84,8 @@ struct StmBackendInner<'a> {
     /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
     _reset: Output<'a>,
     touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
+    ltdc: Ltdc<'a>,
+    dsi: Dsi<'a>,
 }
 
 struct StmBackend<'a> {
@@ -147,6 +144,7 @@ impl<'a> StmBackend<'a> {
             },
         );
 
+        debug!("Init touch_screen");
         touch_screen.init().unwrap();
         touch_screen.set_orientation(match LCD_ORIENTATION {
             Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
@@ -171,105 +169,13 @@ impl<'a> StmBackend<'a> {
         BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
          */
 
-        let mut ltdc = Ltdc::new(ltdc);
+
         let dsi_config = dsi::Config::stm32f469_disco(LCD_ORIENTATION);
+
+        let mut ltdc = ltdc::Ltdc::new(ltdc, &dsi_config);
+
         let mut dsi = Dsi::new(dsihost, pj2, &dsi_config);
 
-        // Here comes HAL_DSI_ConfigPhyTimer() in the BSP example. We have already configured it at the beginning.
-
-        let ltdc_pc_polarity = Pcpol::RISINGEDGE; // LTDC_PCPOLARITY_IPC == 0
-
-        let ltdc_de_polarity: Depol = if dsi_config.de_polarity == false {
-            Depol::ACTIVELOW
-        } else {
-            Depol::ACTIVEHIGH
-        };
-        let ltdc_vs_polarity: Vspol = if dsi_config.vs_polarity == false {
-            Vspol::ACTIVEHIGH
-        } else {
-            Vspol::ACTIVELOW
-        };
-
-        let ltdc_hs_polarity: Hspol = if dsi_config.hs_polarity == false {
-            Hspol::ACTIVEHIGH
-        } else {
-            Hspol::ACTIVELOW
-        };
-
-        /* Timing Configuration */
-        let horizontal_sync: u16 = dsi_config.hsa - 1;
-        let vertical_sync: u16 = dsi_config.vsa - 1;
-        let accumulated_hbp: u16 = dsi_config.hsa + dsi_config.hbp - 1;
-        let accumulated_vbp: u16 = dsi_config.vsa + dsi_config.vbp - 1;
-        let accumulated_active_w: u16 = dsi_config.width + dsi_config.hsa + dsi_config.hbp - 1;
-        let accumulated_active_h: u16 = dsi_config.height + dsi_config.vsa + dsi_config.vbp - 1;
-        let total_width: u16 =
-            dsi_config.width + dsi_config.hsa + dsi_config.hbp + dsi_config.hfp - 1;
-        let total_height: u16 =
-            dsi_config.height + dsi_config.vsa + dsi_config.vbp + dsi_config.vfp - 1;
-
-        /*
-        ######################################
-         BEGIN HAL_LTDC_Init()
-        ######################################
-        */
-
-        // DISABLE LTDC before making changes
-        ltdc.disable();
-
-        // Configure the HS, VS, DE and PC polarity
-        LTDC.gcr().modify(|w| {
-            w.set_hspol(ltdc_hs_polarity);
-            w.set_vspol(ltdc_vs_polarity);
-            w.set_depol(ltdc_de_polarity);
-            w.set_pcpol(ltdc_pc_polarity); // #define LTDC_PCPOLARITY_IPC 0x00000000U
-        });
-
-        // Set Synchronization size
-        LTDC.sscr().modify(|w| {
-            w.set_hsw(horizontal_sync);
-            w.set_vsh(vertical_sync)
-        });
-
-        // Set Accumulated Back porch
-        LTDC.bpcr().modify(|w| {
-            w.set_ahbp(accumulated_hbp);
-            w.set_avbp(accumulated_vbp);
-        });
-
-        // Set Accumulated Active Width
-        LTDC.awcr().modify(|w| {
-            w.set_aah(accumulated_active_h);
-            w.set_aaw(accumulated_active_w);
-        });
-
-        // Set Total Width
-        LTDC.twcr().modify(|w| {
-            w.set_totalh(total_height);
-            w.set_totalw(total_width);
-        });
-
-        // Set the background color value
-        LTDC.bccr().modify(|w| {
-            w.set_bcred(0);
-            w.set_bcgreen(0);
-            w.set_bcblue(0)
-        });
-
-        // Enable the Transfer Error and FIFO underrun interrupts
-        LTDC.ier().modify(|w| {
-            w.set_terrie(true);
-            w.set_fuie(true);
-        });
-
-        // ENABLE LTDC after making changes
-        ltdc.enable();
-
-        /*
-        ######################################
-         END HAL_LTDC_Init()
-        ######################################
-        */
 
         /*
         ######################################
@@ -293,6 +199,7 @@ impl<'a> StmBackend<'a> {
 
         // FIXME: This should probably be done with a trait or so...
         let mut write_closure = |address: u8, data: &[u8]| dsi.write_cmd(0, address, data).unwrap();
+
         embedded_dal::drivers::nt35510::init(
             &mut write_closure,
             embassy_time::Delay,
@@ -305,7 +212,7 @@ impl<'a> StmBackend<'a> {
         ######################################
         */
 
-        ltdc::config_layer(
+        ltdc.config_layer(
             ltdc::Window {
                 x0: 0,
                 x1: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
@@ -316,7 +223,7 @@ impl<'a> StmBackend<'a> {
                 width: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
                 height: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
             },
-            Pf::ARGB8888,
+            embassy_stm32::pac::ltdc::vals::Pf::ARGB8888,
             255,
             0,
             ltdc::RGB {
@@ -340,6 +247,8 @@ impl<'a> StmBackend<'a> {
                 scb: scb,
                 _reset: reset,
                 touch_screen,
+                ltdc,
+                dsi,
             }),
         }
     }
@@ -388,7 +297,7 @@ impl slint::platform::Platform for StmBackend<'_> {
                     renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
-                    ltdc::set_framebuffer(work_fb.as_ptr() as *const u32);
+                    inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
                 });
 
@@ -680,6 +589,7 @@ async fn main(_spawner: Spawner) {
     };
     */
 
+    info!("Init StmBackend");
     slint::platform::set_platform(Box::new(StmBackend::init(
         p.DSIHOST, p.LTDC, p.I2C1, p.PB8, p.PB9, p.PG6, p.PJ2, p.PJ5, p.PH7,
         p.EXTI5, //fb1, fb2,

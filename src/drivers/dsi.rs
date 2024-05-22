@@ -143,6 +143,10 @@ pub const fn to_clock_cycles(val: u16, lane_byte_clk_k_hz: u16, lcd_clk: u16) ->
 }
 
 impl Dsi<'_> {
+
+    /// Basic configuration of the DSIHOST
+    /// 
+    /// Leaves DSIHOST disabled! **call `enable()` when all config is done before using**.
     pub fn new(dsi: DSIHOST, tepin: PJ2, config: &Config) -> Self {
         let mut dsi = DsiHost::new(dsi, tepin);
 
