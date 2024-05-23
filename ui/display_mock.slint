@@ -1,8 +1,7 @@
- import { NumericSetting } from "components/numeric-setting.slint";
- import { GlobalSettings } from "global_settings.slint";
- import { NavButton } from "components/nav-button.slint";
+import { GlobalSettings } from "global_settings.slint";
 import { ManualBrewScreen } from "pages/manual-brew.slint";
 import { Page } from "pages/page.slint";
+import { Selection } from "pages/selection.slint";
 
 
 
@@ -13,8 +12,6 @@ export component MainWindow inherits Window {
     min-height: 480px;
     title: @tr("Coffee");
 
-
-    if GlobalSettings.current-page == 0: Page {}
-    if GlobalSettings.current-page == 1: ManualBrewScreen {}
-
+    if GlobalSettings.current-page == 0: Selection { }
+    if GlobalSettings.current-page == 1: ManualBrewScreen { }
 }

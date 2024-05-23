@@ -73,7 +73,7 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
 
 use embedded_alloc::Heap;
 
-const HEAP_SIZE: usize = 200 * 1024;
+const HEAP_SIZE: usize = 250 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 #[global_allocator]
@@ -293,8 +293,9 @@ impl slint::platform::Platform for StmBackend<'_> {
 
             if let Some(window) = self.window.borrow().clone() {
                 window.draw_if_needed(|renderer| {
-                    debug!("start rendering");
+                    debug!("start rendering...");
                     renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
+                    debug!("... done rendering");
                     inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
                     inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);

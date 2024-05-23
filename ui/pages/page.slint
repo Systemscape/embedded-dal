@@ -14,7 +14,7 @@ export component Page {
     VerticalLayout {
         @children
         // Back and Start menu
-            HorizontalLayout {
+        HorizontalLayout {
             //height: 100px;
             width: 800px;
             alignment: space-between;
@@ -28,6 +28,7 @@ export component Page {
                 width: 250px;
                 clicked => {
                     GlobalSettings.current-page = 0;
+                    debug("clicked back");
                 }
             }
 
@@ -41,6 +42,7 @@ export component Page {
 
                 clicked => {
                     GlobalSettings.current-page = 1;
+                    debug("clicked start");
                 }
             }
         }
