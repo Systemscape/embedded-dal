@@ -12,22 +12,22 @@ use embedded_dal::{
     config::{Dimensions, Orientation},
     drivers::{
         dsi::{self, Dsi},
-        ft6x36::Ft6x36,
         ltdc::{self, Ltdc},
     },
 };
 
 use embassy_executor::Spawner;
 
-use core::cell::RefCell;
+use core::{borrow::BorrowMut, cell::RefCell};
 
 use defmt::*;
 use embassy_stm32::{
+    bind_interrupts,
     exti::ExtiInput,
     gpio::{Level, Output, Speed},
-    i2c::I2c,
-    mode::Blocking,
-    peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PB8, PB9, PG6, PH7, PJ2, PJ5},
+    i2c::{self, Error, I2c},
+    mode::Async,
+    peripherals::{self, DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
             AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth,
@@ -44,7 +44,26 @@ use embassy_stm32::{
     },
 };
 
+use embedded_hal::delay::DelayNs;
+
 use {defmt_rtt as _, panic_probe as _};
+
+const ADDRESS: u8 = 0x28;
+const PROD_ID: u8 = 0x00;
+const STATUS: u8 = 0x01;
+const MEAS_RATE_H: u8 = 0x02;
+const MEAS_RATE_L: u8 = 0x03;
+const MEAS_CFG: u8 = 0x04;
+const CO2PPM_H: u8 = 0x05;
+const CO2PPM_L: u8 = 0x06;
+const MEAS_STS: u8 = 0x07;
+const PRES_REF_H: u8 = 0x0B;
+const PRES_REF_L: u8 = 0x0C;
+
+bind_interrupts!(struct Irqs {
+    I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
+    I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
+});
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -70,7 +89,6 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     b: 0,
 }; NUM_PIXELS];
 
-
 use embedded_alloc::Heap;
 
 const HEAP_SIZE: usize = 250 * 1024;
@@ -83,7 +101,6 @@ struct StmBackendInner<'a> {
     scb: cortex_m::peripheral::SCB,
     /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
     _reset: Output<'a>,
-    touch_screen: Ft6x36<I2c<'a, I2C1, Blocking>>,
     ltdc: Ltdc<'a>,
     dsi: Dsi<'a>,
 }
@@ -98,9 +115,6 @@ impl<'a> StmBackend<'a> {
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
-        i2c1: I2C1,
-        pb8: PB8,
-        pb9: PB9,
         pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
@@ -127,55 +141,17 @@ impl<'a> StmBackend<'a> {
         // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
         //embassy_time::block_for(embassy_time::Duration::from_millis(160));
 
-        let i2c = embassy_stm32::i2c::I2c::new_blocking(
-            i2c1,
-            pb8,
-            pb9,
-            Hertz(400_000),
-            Default::default(),
-        );
-
-        let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
-            i2c,
-            0x38,
-            embedded_dal::drivers::ft6x36::Dimension {
-                x: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
-                y: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
-            },
-        );
-
-        debug!("Init touch_screen");
-        touch_screen.init().unwrap();
-        touch_screen.set_orientation(match LCD_ORIENTATION {
-            Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
-            Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
-        });
-
-        match touch_screen.get_info() {
-            Some(info) => info!("Got touch screen info: {:#?}", info),
-            None => warn!("No info"),
-        }
-
-        let diag = touch_screen.get_diagnostics().unwrap();
-        info!("Got touch screen diag: {:#?}", diag);
-
-        info!("Get touch event: {:#?}", touch_screen.get_touch_event());
-
-        // END TOUCHSCREEN
-
         //let mut led = Output::new(pg6, Level::High, Speed::Low); // Currently unused
 
         /*
         BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
          */
 
-
         let dsi_config = dsi::Config::stm32f469_disco(LCD_ORIENTATION);
 
         let mut ltdc = ltdc::Ltdc::new(ltdc, &dsi_config);
 
         let mut dsi = Dsi::new(dsihost, pj2, &dsi_config);
-
 
         /*
         ######################################
@@ -246,7 +222,6 @@ impl<'a> StmBackend<'a> {
             inner: RefCell::new(StmBackendInner {
                 scb: scb,
                 _reset: reset,
-                touch_screen,
                 ltdc,
                 dsi,
             }),
@@ -279,7 +254,6 @@ impl slint::platform::Platform for StmBackend<'_> {
         let mut displayed_fb: &mut [TargetPixel] = fb1;
         let mut work_fb: &mut [TargetPixel] = fb2;
 
-        let mut last_touch = None;
         self.window
             .borrow()
             .as_ref()
@@ -301,44 +275,6 @@ impl slint::platform::Platform for StmBackend<'_> {
                     inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
                 });
-
-                // handle touch event
-                let button = slint::platform::PointerEventButton::Left;
-                let event = match inner
-                    .touch_screen
-                    .get_touch_event()
-                    .map(|x| x.p1)
-                    .ok()
-                    .flatten()
-                {
-                    Some(state) => {
-                        let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                            .to_logical(window.scale_factor());
-
-                        //info!("Got Touch: {:#?}", state);
-                        Some(match last_touch.replace(position) {
-                            Some(_) => slint::platform::WindowEvent::PointerMoved { position },
-                            None => {
-                                slint::platform::WindowEvent::PointerPressed { position, button }
-                            }
-                        })
-                    }
-                    None => last_touch.take().map(|position| {
-                        slint::platform::WindowEvent::PointerReleased { position, button }
-                    }),
-                };
-
-                if let Some(event) = event {
-                    let is_pointer_release_event =
-                        matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
-
-                    window.dispatch_event(event);
-
-                    // removes hover state on widgets^
-                    if is_pointer_release_event {
-                        window.dispatch_event(slint::platform::WindowEvent::PointerExited);
-                    }
-                }
             }
 
             // FIXME: cortex_m::asm::wfe();
@@ -480,7 +416,6 @@ async fn main(_spawner: Spawner) {
     ram_slice[..10].copy_from_slice(test_slice);
     ram_slice[ram_slice.len() - 1] = 0x12; // Ensure we can write until the end
 
-  
     info!("RAM contents after writing: {:x}", unsafe {
         core::ptr::read_volatile(ram_slice[..20].as_ptr() as *const [u32; 20])
     });
@@ -491,7 +426,6 @@ async fn main(_spawner: Spawner) {
     info!("Erasing RAM...");
     ram_slice.fill(0x00);
     info!("Done!");
-
 
     let config = Config {
         memory_size: MemorySize::_128MiB,
@@ -521,7 +455,6 @@ async fn main(_spawner: Spawner) {
 
     embassy_time::block_for(Duration::from_millis(2000));
 
-
     extern "C" {
         static mut __s_slint_assets: u8;
         static __e_slint_assets: u8;
@@ -548,8 +481,7 @@ async fn main(_spawner: Spawner) {
                 - core::ptr::addr_of!(__s_slint_assets) as usize,
         );
 
-        let mut asset_flash_addr =
-        core::ptr::addr_of!(__si_slint_assets) as usize - 0x9000_0000;
+        let mut asset_flash_addr = core::ptr::addr_of!(__si_slint_assets) as usize - 0x9000_0000;
 
         defmt::assert!(asset_mem_slice.len() > 0);
 
@@ -567,7 +499,6 @@ async fn main(_spawner: Spawner) {
 
             asset_flash_addr += chunk.len();
         }
-
     }
 
     let mut cp = cortex_m::Peripherals::take().unwrap();
@@ -592,14 +523,131 @@ async fn main(_spawner: Spawner) {
 
     info!("Init StmBackend");
     slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST, p.LTDC, p.I2C1, p.PB8, p.PB9, p.PG6, p.PJ2, p.PJ5, p.PH7,
-        p.EXTI5, //fb1, fb2,
+        p.DSIHOST, p.LTDC, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
         cp.SCB,
     )))
     .expect("backend already initialized");
 
     let window = MainWindow::new().unwrap();
+
+    let window_weak = window.as_weak();
+
+    let mut config = embassy_stm32::i2c::Config::default();
+    config.sda_pullup = true;
+    config.scl_pullup = true;
+
+    static i2c_stat: static_cell::StaticCell<I2c<I2C1, Async>> = static_cell::StaticCell::new();
+
+    let mut i2c: &'static mut I2c<I2C1, Async> = i2c_stat.init(embassy_stm32::i2c::I2c::new(
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        Irqs,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Hertz(400_000),
+        config,
+    ));
+
+    let mut data = [0u8; 1];
+
+    match i2c.blocking_write_read(ADDRESS, &[PROD_ID], &mut data) {
+        Ok(()) => info!("PROD_ID: {:b}", data[0]),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    match i2c.blocking_write_read(ADDRESS, &[STATUS], &mut data) {
+        Ok(()) => info!("STATUS: {:b}", data[0]),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    // Set Idle Mode
+    match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x00]) {
+        Ok(()) => info!("Set Idle Mode"),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    let pressure: u16 = 950; //hPa
+
+    // Set Pressure High Byte
+    match i2c.blocking_write(ADDRESS, &[PRES_REF_H, ((pressure & 0xFF00) >> 8) as u8]) {
+        Ok(()) => info!("Set Pressure High Byte"),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    // Set Pressure Low Byte
+    match i2c.blocking_write(ADDRESS, &[PRES_REF_L, (pressure & 0x00FF) as u8]) {
+        Ok(()) => info!("Set Pressure Low Byte"),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    // Idle Mode
+    match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x00]) {
+        Ok(()) => info!("Set Single Measurement Mode"),
+        Err(Error::Timeout) => error!("Operation timed out"),
+        Err(e) => error!("I2c Error: {:?}", e),
+    }
+
+    let _kiosk_mode_timer = kiosk_timer(&window, i2c);
+
     window.run().unwrap();
+}
+
+fn kiosk_timer(
+    window: &MainWindow,
+    i2c: &'static mut I2c<embassy_stm32::peripherals::I2C1, Async>,
+) -> slint::Timer {
+    let kiosk_mode_timer = slint::Timer::default();
+    kiosk_mode_timer.start(
+        slint::TimerMode::Repeated,
+        core::time::Duration::from_secs(60),
+        {
+            let window_weak = window.as_weak();
+            move || {
+                let mut data = [0u8; 1];
+
+                // Init Measurement
+                match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x01]) {
+                    Ok(()) => (),
+                    Err(Error::Timeout) => error!("Operation timed out"),
+                    Err(e) => error!("I2c Error: {:?}", e),
+                }
+                embassy_time::Delay {}.delay_ms(1150);
+
+                // Read measured value High Byte
+                match i2c.blocking_write_read(ADDRESS, &[CO2PPM_H], &mut data) {
+                    Ok(()) => (),
+                    Err(Error::Timeout) => error!("Operation timed out"),
+                    Err(e) => error!("I2c Error: {:?}", e),
+                }
+                let co2_high_byte = data[0];
+
+                embassy_time::Delay {}.delay_ms(5);
+
+                // Read measured value Low Byte
+                match i2c.blocking_write_read(ADDRESS, &[CO2PPM_L], &mut data) {
+                    Ok(()) => (),
+                    Err(Error::Timeout) => error!("Operation timed out"),
+                    Err(e) => error!("I2c Error: {:?}", e),
+                }
+                embassy_time::Delay {}.delay_ms(5);
+
+                let co2_low_byte = data[0];
+
+                let co2_ppm = u16::from_be_bytes([co2_high_byte, co2_low_byte]);
+
+                info!("CO2 PPM: {}", co2_ppm);
+                window_weak.upgrade().unwrap().set_co2_ppm(co2_ppm.into());
+            }
+        },
+    );
+
+    kiosk_mode_timer
 }
 
 slint::include_modules!();

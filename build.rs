@@ -27,7 +27,8 @@ fn main() {
     let config = slint_build::CompilerConfiguration::new()
         .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer)
         .with_style("material".into());
-    slint_build::compile_with_config("ui/display_mock.slint", config).unwrap();
+    //slint_build::compile_with_config("ui/display_mock.slint", config).unwrap();
+    slint_build::compile_with_config("window.slint", config).unwrap();
     slint_build::print_rustc_flags().unwrap();
 
     println!("cargo:EMBED_TEXTURES=1");

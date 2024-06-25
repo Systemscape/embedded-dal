@@ -37,6 +37,8 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "daaaf
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
 
 embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+static_cell = "2.1"
 
 stm32-fmc = { version = "0.3", default-features = false, features = ["sdram"], optional = true }
 

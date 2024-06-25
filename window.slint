@@ -12,45 +12,56 @@ export component MainWindow inherits Window {
         btn.background = state ? Colors.black : Colors.red;
     }
 
-    HorizontalBox {
-        VerticalLayout {
-            spacing: 20px;
-            btn := Rectangle {
-                width: 300px;
-                height: 200px;
-                background: state ? black : red;
-                TouchArea {
+    in property <int> co2_ppm: 999;
+    VerticalLayout {
+        HorizontalBox {
+            VerticalLayout {
+                spacing: 20px;
+                btn := Rectangle {
+                    width: 300px;
+                    height: 200px;
+                    background: state ? black : red;
+                    TouchArea {
+                        width: 152px;
+                        height: 130px;
+                        clicked => {
+                            state = !state;
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Button";
+                    width: 100px;
+                    height: 50px;
                     clicked => {
                         state = !state;
                     }
                 }
             }
 
-            Button {
-                text: "Button";
-                width: 100px;
-                height: 50px;
-                clicked => {
-                    state = !state;
-                }
+            Text {
+                text: state ? "True" : "False";
+                color: black;
+            }
+
+            if state: Image {
+                source: @image-url("./Artboard_Icon.png");
+                width: 200px;
+                height: 200px;
+                colorize: black;
+            }
+            if !state: Image {
+                source: @image-url("./Artboard_Icon.png");
+                width: 200px;
+                height: 200px;
             }
         }
 
-        Text {
-            text: state ? "True" : "False";
-            color: black;
-        }
-
-        if state: Image {
-            source: @image-url("./Artboard_Icon.png");
-            width: 200px;
-            height: 200px;
-            colorize: black;
-        }
-        if !state: Image {
-            source: @image-url("./Artboard_Icon.png");
-            width: 200px;
-            height: 200px;
+        co2text := Text {
+            horizontal-alignment: center;
+            text: co2_ppm;
+            font-size: 140px;
         }
     }
 }
