@@ -24,8 +24,9 @@ use defmt::*;
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
+    gpio::Pull,
     gpio::{Level, Output, Speed},
-    i2c::{self, Error, I2c},
+    i2c::{self, I2c},
     mode::Async,
     peripherals::{self, DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
@@ -34,14 +35,16 @@ use embassy_stm32::{
         },
         Config, TransferConfig,
     },
-    rcc::{Hse, HseMode, Pll},
-    time::{mhz, Hertz},
-};
-use embassy_stm32::{
-    gpio::Pull,
     rcc::{
         AHBPrescaler, APBPrescaler, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk,
     },
+    rcc::{Hse, HseMode, Pll},
+    time::{mhz, Hertz},
+};
+
+use pas_co2_rs::{
+    regs::{MeasurementMode, OperatingMode},
+    PasCo2,
 };
 
 use embedded_hal::delay::DelayNs;
@@ -530,15 +533,14 @@ async fn main(_spawner: Spawner) {
 
     let window = MainWindow::new().unwrap();
 
-    let window_weak = window.as_weak();
-
     let mut config = embassy_stm32::i2c::Config::default();
     config.sda_pullup = true;
     config.scl_pullup = true;
 
-    static i2c_stat: static_cell::StaticCell<I2c<I2C1, Async>> = static_cell::StaticCell::new();
+    static pas_co2_stat: static_cell::StaticCell<PasCo2<I2c<I2C1, Async>>> =
+        static_cell::StaticCell::new();
 
-    let mut i2c: &'static mut I2c<I2C1, Async> = i2c_stat.init(embassy_stm32::i2c::I2c::new(
+    let i2c = embassy_stm32::i2c::I2c::new(
         p.I2C1,
         p.PB8,
         p.PB9,
@@ -547,60 +549,27 @@ async fn main(_spawner: Spawner) {
         p.DMA1_CH0,
         Hertz(400_000),
         config,
-    ));
+    );
 
-    let mut data = [0u8; 1];
+    let pas_co2: &'static mut PasCo2<I2c<I2C1, Async>> = pas_co2_stat.init(PasCo2::new(i2c));
+    info!("Status: {}", pas_co2.get_status());
 
-    match i2c.blocking_write_read(ADDRESS, &[PROD_ID], &mut data) {
-        Ok(()) => info!("PROD_ID: {:b}", data[0]),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
-
-    match i2c.blocking_write_read(ADDRESS, &[STATUS], &mut data) {
-        Ok(()) => info!("STATUS: {:b}", data[0]),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
-
-    // Set Idle Mode
-    match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x00]) {
-        Ok(()) => info!("Set Idle Mode"),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
+    let mut mode = MeasurementMode::default();
+    mode.operating_mode = OperatingMode::Idle;
+    pas_co2.set_measurement_mode(mode).unwrap();
 
     let pressure: u16 = 950; //hPa
 
-    // Set Pressure High Byte
-    match i2c.blocking_write(ADDRESS, &[PRES_REF_H, ((pressure & 0xFF00) >> 8) as u8]) {
-        Ok(()) => info!("Set Pressure High Byte"),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
+    pas_co2.set_pressure_compensation(pressure).unwrap();
 
-    // Set Pressure Low Byte
-    match i2c.blocking_write(ADDRESS, &[PRES_REF_L, (pressure & 0x00FF) as u8]) {
-        Ok(()) => info!("Set Pressure Low Byte"),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
-
-    // Idle Mode
-    match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x00]) {
-        Ok(()) => info!("Set Single Measurement Mode"),
-        Err(Error::Timeout) => error!("Operation timed out"),
-        Err(e) => error!("I2c Error: {:?}", e),
-    }
-
-    let _kiosk_mode_timer = kiosk_timer(&window, i2c);
+    let _kiosk_mode_timer = kiosk_timer(&window, pas_co2);
 
     window.run().unwrap();
 }
 
 fn kiosk_timer(
     window: &MainWindow,
-    i2c: &'static mut I2c<embassy_stm32::peripherals::I2C1, Async>,
+    pas_co2: &'static mut PasCo2<I2c<embassy_stm32::peripherals::I2C1, Async>>,
 ) -> slint::Timer {
     let kiosk_mode_timer = slint::Timer::default();
     kiosk_mode_timer.start(
@@ -609,44 +578,17 @@ fn kiosk_timer(
         {
             let window_weak = window.as_weak();
             move || {
-                let mut data = [0u8; 1];
-
-                // Init Measurement
-                match i2c.blocking_write(ADDRESS, &[MEAS_CFG, 0x01]) {
-                    Ok(()) => (),
-                    Err(Error::Timeout) => error!("Operation timed out"),
-                    Err(e) => error!("I2c Error: {:?}", e),
-                }
+                pas_co2.start_measurement().unwrap();
                 embassy_time::Delay {}.delay_ms(1150);
 
-                // Read measured value High Byte
-                match i2c.blocking_write_read(ADDRESS, &[CO2PPM_H], &mut data) {
-                    Ok(()) => (),
-                    Err(Error::Timeout) => error!("Operation timed out"),
-                    Err(e) => error!("I2c Error: {:?}", e),
-                }
-                let co2_high_byte = data[0];
-
-                embassy_time::Delay {}.delay_ms(5);
-
-                // Read measured value Low Byte
-                match i2c.blocking_write_read(ADDRESS, &[CO2PPM_L], &mut data) {
-                    Ok(()) => (),
-                    Err(Error::Timeout) => error!("Operation timed out"),
-                    Err(e) => error!("I2c Error: {:?}", e),
-                }
-                embassy_time::Delay {}.delay_ms(5);
-
-                let co2_low_byte = data[0];
-
-                let co2_ppm = u16::from_be_bytes([co2_high_byte, co2_low_byte]);
+                let co2_ppm = pas_co2.get_co2_ppm().unwrap();
 
                 info!("CO2 PPM: {}", co2_ppm);
                 window_weak.upgrade().unwrap().set_co2_ppm(co2_ppm.into());
 
                 let color = match co2_ppm {
                     0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
-                    700..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
+                    701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
                     _ => slint::Color::from_rgb_u8(255, 0, 0),
                 };
                 window_weak.upgrade().unwrap().set_background_color(color);
