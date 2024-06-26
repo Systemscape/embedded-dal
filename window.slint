@@ -7,9 +7,9 @@ export component MainWindow inherits Window {
     background: white;
     property <bool> state: false;
 
-
     in property <int> co2_ppm: 9999;
     in property <color> background_color: gray;
+    in property <string> status_text: "Status...";
 
     border := Rectangle {
         width: 100%;
@@ -20,15 +20,21 @@ export component MainWindow inherits Window {
     Rectangle {
         x: 50px;
         y: 50px;
-        width: root.width - 2*self.x;
-        height: root.height - 2*self.y;
+        width: root.width - 2 * self.x;
+        height: root.height - 2 * self.y;
         background: white;
-
     }
 
     co2text := Text {
         horizontal-alignment: center;
         text: co2_ppm;
         font-size: 280px;
+    }
+
+    Text {
+        x: 60px;
+        y: 400px;
+        horizontal-alignment: left;
+        text: status_text;
     }
 }

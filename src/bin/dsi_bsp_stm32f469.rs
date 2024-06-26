@@ -2,7 +2,7 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::boxed::Box;
+use alloc::{borrow::ToOwned, boxed::Box};
 use alloc::rc::Rc;
 
 use cortex_m::peripheral::SCB;
@@ -17,6 +17,7 @@ use embedded_dal::{
 };
 
 use embassy_executor::Spawner;
+use slint::Weak;
 
 use core::{borrow::BorrowMut, cell::RefCell};
 
@@ -50,18 +51,6 @@ use pas_co2_rs::{
 use embedded_hal::delay::DelayNs;
 
 use {defmt_rtt as _, panic_probe as _};
-
-const ADDRESS: u8 = 0x28;
-const PROD_ID: u8 = 0x00;
-const STATUS: u8 = 0x01;
-const MEAS_RATE_H: u8 = 0x02;
-const MEAS_RATE_L: u8 = 0x03;
-const MEAS_CFG: u8 = 0x04;
-const CO2PPM_H: u8 = 0x05;
-const CO2PPM_L: u8 = 0x06;
-const MEAS_STS: u8 = 0x07;
-const PRES_REF_H: u8 = 0x0B;
-const PRES_REF_L: u8 = 0x0C;
 
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
@@ -562,41 +551,61 @@ async fn main(_spawner: Spawner) {
 
     pas_co2.set_pressure_compensation(pressure).unwrap();
 
-    let _kiosk_mode_timer = kiosk_timer(&window, pas_co2);
+    let window_weak = window.as_weak();
 
-    window.run().unwrap();
-}
+    measure_co2(pas_co2, window_weak.clone());
 
-fn kiosk_timer(
-    window: &MainWindow,
-    pas_co2: &'static mut PasCo2<I2c<embassy_stm32::peripherals::I2C1, Async>>,
-) -> slint::Timer {
     let kiosk_mode_timer = slint::Timer::default();
     kiosk_mode_timer.start(
         slint::TimerMode::Repeated,
         core::time::Duration::from_secs(60),
-        {
-            let window_weak = window.as_weak();
-            move || {
-                pas_co2.start_measurement().unwrap();
-                embassy_time::Delay {}.delay_ms(1150);
-
-                let co2_ppm = pas_co2.get_co2_ppm().unwrap();
-
-                info!("CO2 PPM: {}", co2_ppm);
-                window_weak.upgrade().unwrap().set_co2_ppm(co2_ppm.into());
-
-                let color = match co2_ppm {
-                    0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
-                    701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
-                    _ => slint::Color::from_rgb_u8(255, 0, 0),
-                };
-                window_weak.upgrade().unwrap().set_background_color(color);
-            }
-        },
+        move || measure_co2(pas_co2, window_weak.clone()),
     );
 
-    kiosk_mode_timer
+    //let _kiosk_mode_timer = kiosk_timer(&window, pas_co2);
+
+    window.run().unwrap();
+}
+
+fn measure_co2(pas_co2: &mut PasCo2<I2c<I2C1, Async>>, window_weak: Weak<MainWindow>) {
+    let window = window_weak.upgrade().unwrap();
+
+    let status = pas_co2.get_status().unwrap();
+    info!("Status: {}", status);
+
+    let status_text = "Ready: ".to_owned()
+        + if status.ready { "Yes" } else { "No" }
+        + ", Temp.: "
+        + if status.temperature_error {
+            "Error"
+        } else {
+            "OK"
+        }
+        + ", Voltage: "
+        + if status.voltage_error { "Error" } else { "OK" }
+        + ", Comm.: "
+        + if status.communication_error {
+            "Error"
+        } else {
+            "OK"
+        };
+
+    window.set_status_text(status_text.into());
+
+    pas_co2.start_measurement().unwrap();
+    embassy_time::Delay {}.delay_ms(1150);
+
+    let co2_ppm = pas_co2.get_co2_ppm().unwrap();
+
+    info!("CO2 PPM: {}", co2_ppm);
+    window.set_co2_ppm(co2_ppm.into());
+
+    let color = match co2_ppm {
+        0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
+        701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
+        _ => slint::Color::from_rgb_u8(255, 0, 0),
+    };
+    window.set_background_color(color);
 }
 
 slint::include_modules!();
