@@ -10,6 +10,7 @@ export component MainWindow inherits Window {
     in property <int> co2_ppm: 9999;
     in property <color> background_color: gray;
     in property <string> status_text: "Status...";
+    in property <int> time_since_last: 0;
 
     border := Rectangle {
         width: 100%;
@@ -36,5 +37,15 @@ export component MainWindow inherits Window {
         y: 400px;
         horizontal-alignment: left;
         text: status_text;
+        font-size: 20px;
+    }
+
+    
+    Text {
+        x: 60px;
+        y: 80px;
+        horizontal-alignment: left;
+        text: "Letzte Messung: " + time_since_last + " s";
+        font-size: 20px;
     }
 }

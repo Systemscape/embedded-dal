@@ -2,8 +2,8 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::{borrow::ToOwned, boxed::Box};
 use alloc::rc::Rc;
+use alloc::{borrow::ToOwned, boxed::Box};
 
 use cortex_m::peripheral::SCB;
 
@@ -19,7 +19,7 @@ use embedded_dal::{
 use embassy_executor::Spawner;
 use slint::Weak;
 
-use core::{borrow::BorrowMut, cell::RefCell};
+use core::{cell::RefCell, sync::atomic::AtomicI32};
 
 use defmt::*;
 use embassy_stm32::{
@@ -56,6 +56,8 @@ bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
 });
+
+static TIME_LAST: AtomicI32 = AtomicI32::new(0);
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -513,15 +515,6 @@ async fn main(_spawner: Spawner) {
     };
     */
 
-    info!("Init StmBackend");
-    slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST, p.LTDC, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
-        cp.SCB,
-    )))
-    .expect("backend already initialized");
-
-    let window = MainWindow::new().unwrap();
-
     let mut config = embassy_stm32::i2c::Config::default();
     config.sda_pullup = true;
     config.scl_pullup = true;
@@ -551,18 +544,40 @@ async fn main(_spawner: Spawner) {
 
     pas_co2.set_pressure_compensation(pressure).unwrap();
 
+    embassy_time::Delay {}.delay_ms(1000);
+
+    info!("Init StmBackend");
+    slint::platform::set_platform(Box::new(StmBackend::init(
+        p.DSIHOST, p.LTDC, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
+        cp.SCB,
+    )))
+    .expect("backend already initialized");
+
+    let window = MainWindow::new().unwrap();
+
     let window_weak = window.as_weak();
 
     measure_co2(pas_co2, window_weak.clone());
 
-    let kiosk_mode_timer = slint::Timer::default();
-    kiosk_mode_timer.start(
+    let co2_measurement_timer = slint::Timer::default();
+    co2_measurement_timer.start(
         slint::TimerMode::Repeated,
         core::time::Duration::from_secs(60),
         move || measure_co2(pas_co2, window_weak.clone()),
     );
 
-    //let _kiosk_mode_timer = kiosk_timer(&window, pas_co2);
+    let window_weak = window.as_weak();
+    let time_since_last = slint::Timer::default();
+    time_since_last.start(
+        slint::TimerMode::Repeated,
+        core::time::Duration::from_secs(1),
+        move || {
+            let window = window_weak.clone().upgrade().unwrap();
+            let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
+            let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
+            window.set_time_since_last(time_since_last);
+        },
+    );
 
     window.run().unwrap();
 }
@@ -593,6 +608,10 @@ fn measure_co2(pas_co2: &mut PasCo2<I2c<I2C1, Async>>, window_weak: Weak<MainWin
     window.set_status_text(status_text.into());
 
     pas_co2.start_measurement().unwrap();
+    TIME_LAST.store(
+        embassy_time::Instant::now().as_secs() as i32,
+        core::sync::atomic::Ordering::Relaxed,
+    );
     embassy_time::Delay {}.delay_ms(1150);
 
     let co2_ppm = pas_co2.get_co2_ppm().unwrap();
@@ -609,3 +628,9 @@ fn measure_co2(pas_co2: &mut PasCo2<I2c<I2C1, Async>>, window_weak: Weak<MainWin
 }
 
 slint::include_modules!();
+
+#[cortex_m_rt::exception]
+unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    cortex_m::asm::delay(500_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
+}
