@@ -643,6 +643,13 @@ fn kiosk_timer(
 
                 info!("CO2 PPM: {}", co2_ppm);
                 window_weak.upgrade().unwrap().set_co2_ppm(co2_ppm.into());
+
+                let color = match co2_ppm {
+                    0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
+                    700..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
+                    _ => slint::Color::from_rgb_u8(255, 0, 0),
+                };
+                window_weak.upgrade().unwrap().set_background_color(color);
             }
         },
     );

@@ -1,67 +1,34 @@
 import { Button, HorizontalBox, Switch } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
-    title: "EnergyMNG Demo";
+    title: "CO2 Monitor";
     min-width: 800px;
     min-height: 480px;
     background: white;
     property <bool> state: false;
 
-    function update(val: bool) {
-        state = val;
-        btn.background = state ? Colors.black : Colors.red;
+
+    in property <int> co2_ppm: 9999;
+    in property <color> background_color: gray;
+
+    border := Rectangle {
+        width: 100%;
+        height: 100%;
+        background: background_color;
     }
 
-    in property <int> co2_ppm: 999;
-    VerticalLayout {
-        HorizontalBox {
-            VerticalLayout {
-                spacing: 20px;
-                btn := Rectangle {
-                    width: 300px;
-                    height: 200px;
-                    background: state ? black : red;
-                    TouchArea {
-                        width: 152px;
-                        height: 130px;
-                        clicked => {
-                            state = !state;
-                        }
-                    }
-                }
+    Rectangle {
+        x: 50px;
+        y: 50px;
+        width: root.width - 2*self.x;
+        height: root.height - 2*self.y;
+        background: white;
 
-                Button {
-                    text: "Button";
-                    width: 100px;
-                    height: 50px;
-                    clicked => {
-                        state = !state;
-                    }
-                }
-            }
+    }
 
-            Text {
-                text: state ? "True" : "False";
-                color: black;
-            }
-
-            if state: Image {
-                source: @image-url("./Artboard_Icon.png");
-                width: 200px;
-                height: 200px;
-                colorize: black;
-            }
-            if !state: Image {
-                source: @image-url("./Artboard_Icon.png");
-                width: 200px;
-                height: 200px;
-            }
-        }
-
-        co2text := Text {
-            horizontal-alignment: center;
-            text: co2_ppm;
-            font-size: 140px;
-        }
+    co2text := Text {
+        horizontal-alignment: center;
+        text: co2_ppm;
+        font-size: 280px;
     }
 }
