@@ -21,7 +21,7 @@ use embedded_dal::{
 use embassy_executor::Spawner;
 
 use embedded_hal_bus::i2c::RefCellDevice;
-use slint::Weak;
+use slint::{ComponentHandle, Weak};
 
 use core::{cell::RefCell, sync::atomic::AtomicI32};
 
@@ -60,7 +60,7 @@ bind_interrupts!(struct Irqs {
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
 });
 
-static TIME_LAST: AtomicI32 = AtomicI32::new(0);
+static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -99,13 +99,13 @@ struct StmBackendInner<'a> {
     /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
     _reset: Output<'a>,
     ltdc: Ltdc<'a>,
-    dsi: Dsi<'a>,
+    _dsi: Dsi<'a>,
     touch_screen: Ft6x36<RefCellDevice<'a, I2c<'a, I2C1, Blocking>>>,
 }
 
 struct StmBackend<'a> {
     window: RefCell<Option<Rc<slint::platform::software_renderer::MinimalSoftwareWindow>>>,
-    exti_input: ExtiInput<'a>,
+    _exti_input: ExtiInput<'a>,
     inner: RefCell<StmBackendInner<'a>>,
 }
 
@@ -114,7 +114,7 @@ impl<'a> StmBackend<'a> {
         dsihost: DSIHOST,
         ltdc: LTDC,
         i2c: RefCellDevice<'a, I2c<'a, I2C1, Blocking>>,
-        pg6: PG6,
+        _pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
         ph7: PH7,
@@ -672,14 +672,12 @@ fn measure_co2(
     // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
     let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
     let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
-    if time_since_last < 10 {
+    if time_since_last < 10 && time_last != -1 {
         warn!("Last measurement less than 10 sec ago. Not measuring this time!");
         return;
     }
 
     let window = window_weak.upgrade().unwrap();
-
-    window.set_in_progress("Messung läuft".into());
 
     let status = pas_co2.get_status().unwrap();
     info!("Status: {}", status);
@@ -724,7 +722,6 @@ fn measure_co2(
     };
     window.set_background_color(color);
 
-    window.set_in_progress("".into());
 }
 
 slint::include_modules!();

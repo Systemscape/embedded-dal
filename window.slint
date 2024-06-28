@@ -51,7 +51,7 @@ export component MainWindow inherits Window {
         font-size: 20px;
     }
 
-    Text {
+    in_progress_text := Text {
         x: 300px;
         y: 80px;
         text: in_progress;
@@ -59,8 +59,12 @@ export component MainWindow inherits Window {
 
     TouchArea {
         clicked => {
+            debug("start_measurement(), setting text");
+            in_progress_text.text = "Messung läuft...";
+            debug("start_measurement(), init callback");
             root.start_measurement();
-            debug("start_measurement() callback")
+            debug("start_measurement(), resetting text");
+            in_progress_text.text = in_progress;
         }
     }
 }
