@@ -245,12 +245,12 @@ impl<'a> StmBackend<'a> {
 
         Self {
             window: RefCell::default(),
-            exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
+            _exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
             inner: RefCell::new(StmBackendInner {
                 scb: scb,
                 _reset: reset,
                 ltdc,
-                dsi,
+                _dsi: dsi,
                 touch_screen,
             }),
         }
@@ -267,6 +267,7 @@ impl slint::platform::Platform for StmBackend<'_> {
         self.window.replace(Some(window.clone()));
         Ok(window)
     }
+    
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let inner = &mut *self.inner.borrow_mut();
 
@@ -594,14 +595,14 @@ async fn main(_spawner: Spawner) {
     static i2c_static: static_cell::StaticCell<RefCell<I2c<I2C1, Blocking>>> =
         static_cell::StaticCell::new();
 
-    static pas_co2_stat: static_cell::StaticCell<PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>> =
-        static_cell::StaticCell::new();
+    //static pas_co2_stat: static_cell::StaticCell<PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>> = static_cell::StaticCell::new();
 
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), config);
 
     let i2c: &'static mut RefCell<I2c<I2C1, Blocking>> = i2c_static.init(RefCell::new(i2c));
 
-    let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
+    //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
+    let mut pas_co2 = PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c));
 
     info!("Status: {}", pas_co2.get_status());
 
@@ -636,9 +637,9 @@ async fn main(_spawner: Spawner) {
 
     let window_weak = window.as_weak();
 
-    measure_co2(pas_co2, window_weak.clone());
+    measure_co2(&mut pas_co2, window_weak.clone());
 
-    window.on_start_measurement(move || measure_co2(pas_co2, window_weak.clone()));
+    window.on_start_measurement(move || measure_co2(&mut pas_co2, window_weak.clone()));
 
     let window_weak = window.as_weak();
 

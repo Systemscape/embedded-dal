@@ -51,20 +51,19 @@ export component MainWindow inherits Window {
         font-size: 20px;
     }
 
+    // Currently unused. This won't render when set inside the measure_co2 function.
     in_progress_text := Text {
-        x: 300px;
+        x: 500px;
         y: 80px;
         text: in_progress;
+        horizontal-alignment: left;
+        font-size: 20px;
     }
 
     TouchArea {
         clicked => {
-            debug("start_measurement(), setting text");
-            in_progress_text.text = "Messung läuft...";
-            debug("start_measurement(), init callback");
+            debug("start_measurement()");
             root.start_measurement();
-            debug("start_measurement(), resetting text");
-            in_progress_text.text = in_progress;
         }
     }
 }
