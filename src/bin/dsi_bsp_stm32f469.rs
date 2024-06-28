@@ -7,7 +7,9 @@ use alloc::{borrow::ToOwned, boxed::Box};
 
 use cortex_m::peripheral::SCB;
 
+use embassy_stm32::mode::Blocking;
 use embassy_time::Duration;
+use embedded_dal::drivers::ft6x36::Ft6x36;
 use embedded_dal::{
     config::{Dimensions, Orientation},
     drivers::{
@@ -17,6 +19,8 @@ use embedded_dal::{
 };
 
 use embassy_executor::Spawner;
+
+use embedded_hal_bus::i2c::RefCellDevice;
 use slint::Weak;
 
 use core::{cell::RefCell, sync::atomic::AtomicI32};
@@ -28,7 +32,6 @@ use embassy_stm32::{
     gpio::Pull,
     gpio::{Level, Output, Speed},
     i2c::{self, I2c},
-    mode::Async,
     peripherals::{self, DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
@@ -44,7 +47,7 @@ use embassy_stm32::{
 };
 
 use pas_co2_rs::{
-    regs::{MeasurementMode, OperatingMode},
+    regs::{measurement_mode::OperatingMode, MeasurementMode, PressureCompensation},
     PasCo2,
 };
 
@@ -97,6 +100,7 @@ struct StmBackendInner<'a> {
     _reset: Output<'a>,
     ltdc: Ltdc<'a>,
     dsi: Dsi<'a>,
+    touch_screen: Ft6x36<RefCellDevice<'a, I2c<'a, I2C1, Blocking>>>,
 }
 
 struct StmBackend<'a> {
@@ -109,6 +113,7 @@ impl<'a> StmBackend<'a> {
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
+        i2c: RefCellDevice<'a, I2c<'a, I2C1, Blocking>>,
         pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
@@ -134,6 +139,34 @@ impl<'a> StmBackend<'a> {
 
         // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
         //embassy_time::block_for(embassy_time::Duration::from_millis(160));
+
+        let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
+            i2c,
+            0x38,
+            embedded_dal::drivers::ft6x36::Dimension {
+                x: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
+                y: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
+            },
+        );
+
+        debug!("Init touch_screen");
+        touch_screen.init().unwrap();
+        touch_screen.set_orientation(match LCD_ORIENTATION {
+            Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
+            Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
+        });
+
+        match touch_screen.get_info() {
+            Some(info) => info!("Got touch screen info: {:#?}", info),
+            None => warn!("No info"),
+        }
+
+        let diag = touch_screen.get_diagnostics().unwrap();
+        info!("Got touch screen diag: {:#?}", diag);
+
+        info!("Get touch event: {:#?}", touch_screen.get_touch_event());
+
+        // END TOUCHSCREEN
 
         //let mut led = Output::new(pg6, Level::High, Speed::Low); // Currently unused
 
@@ -218,6 +251,7 @@ impl<'a> StmBackend<'a> {
                 _reset: reset,
                 ltdc,
                 dsi,
+                touch_screen,
             }),
         }
     }
@@ -233,7 +267,6 @@ impl slint::platform::Platform for StmBackend<'_> {
         self.window.replace(Some(window.clone()));
         Ok(window)
     }
-
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let inner = &mut *self.inner.borrow_mut();
 
@@ -248,6 +281,7 @@ impl slint::platform::Platform for StmBackend<'_> {
         let mut displayed_fb: &mut [TargetPixel] = fb1;
         let mut work_fb: &mut [TargetPixel] = fb2;
 
+        let mut last_touch = None;
         self.window
             .borrow()
             .as_ref()
@@ -269,6 +303,44 @@ impl slint::platform::Platform for StmBackend<'_> {
                     inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
                 });
+
+                // handle touch event
+                let button = slint::platform::PointerEventButton::Left;
+                let event = match inner
+                    .touch_screen
+                    .get_touch_event()
+                    .map(|x| x.p1)
+                    .ok()
+                    .flatten()
+                {
+                    Some(state) => {
+                        let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
+                            .to_logical(window.scale_factor());
+
+                        //info!("Got Touch: {:#?}", state);
+                        Some(match last_touch.replace(position) {
+                            Some(_) => slint::platform::WindowEvent::PointerMoved { position },
+                            None => {
+                                slint::platform::WindowEvent::PointerPressed { position, button }
+                            }
+                        })
+                    }
+                    None => last_touch.take().map(|position| {
+                        slint::platform::WindowEvent::PointerReleased { position, button }
+                    }),
+                };
+
+                if let Some(event) = event {
+                    let is_pointer_release_event =
+                        matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
+
+                    window.dispatch_event(event);
+
+                    // removes hover state on widgets^
+                    if is_pointer_release_event {
+                        window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+                    }
+                }
             }
 
             // FIXME: cortex_m::asm::wfe();
@@ -519,21 +591,18 @@ async fn main(_spawner: Spawner) {
     config.sda_pullup = true;
     config.scl_pullup = true;
 
-    static pas_co2_stat: static_cell::StaticCell<PasCo2<I2c<I2C1, Async>>> =
+    static i2c_static: static_cell::StaticCell<RefCell<I2c<I2C1, Blocking>>> =
         static_cell::StaticCell::new();
 
-    let i2c = embassy_stm32::i2c::I2c::new(
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        Irqs,
-        p.DMA1_CH6,
-        p.DMA1_CH0,
-        Hertz(400_000),
-        config,
-    );
+    static pas_co2_stat: static_cell::StaticCell<PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>> =
+        static_cell::StaticCell::new();
 
-    let pas_co2: &'static mut PasCo2<I2c<I2C1, Async>> = pas_co2_stat.init(PasCo2::new(i2c));
+    let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), config);
+
+    let i2c: &'static mut RefCell<I2c<I2C1, Blocking>> = i2c_static.init(RefCell::new(i2c));
+
+    let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
+
     info!("Status: {}", pas_co2.get_status());
 
     let mut mode = MeasurementMode::default();
@@ -542,13 +611,23 @@ async fn main(_spawner: Spawner) {
 
     let pressure: u16 = 950; //hPa
 
-    pas_co2.set_pressure_compensation(pressure).unwrap();
+    pas_co2
+        .set_pressure_compensation(PressureCompensation(pressure))
+        .unwrap();
 
     embassy_time::Delay {}.delay_ms(1000);
 
+    // ### Init Backend ###
     info!("Init StmBackend");
     slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST, p.LTDC, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
+        p.DSIHOST,
+        p.LTDC,
+        RefCellDevice::new(i2c),
+        p.PG6,
+        p.PJ2,
+        p.PJ5,
+        p.PH7,
+        p.EXTI5, //fb1, fb2,
         cp.SCB,
     )))
     .expect("backend already initialized");
@@ -559,11 +638,15 @@ async fn main(_spawner: Spawner) {
 
     measure_co2(pas_co2, window_weak.clone());
 
+    window.on_start_measurement(move || measure_co2(pas_co2, window_weak.clone()));
+
+    let window_weak = window.as_weak();
+
     let co2_measurement_timer = slint::Timer::default();
     co2_measurement_timer.start(
         slint::TimerMode::Repeated,
         core::time::Duration::from_secs(60),
-        move || measure_co2(pas_co2, window_weak.clone()),
+        move || window_weak.clone().unwrap().invoke_start_measurement(),
     );
 
     let window_weak = window.as_weak();
@@ -582,11 +665,26 @@ async fn main(_spawner: Spawner) {
     window.run().unwrap();
 }
 
-fn measure_co2(pas_co2: &mut PasCo2<I2c<I2C1, Async>>, window_weak: Weak<MainWindow>) {
+fn measure_co2(
+    pas_co2: &mut PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>,
+    window_weak: Weak<MainWindow>,
+) {
+    // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
+    let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
+    let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
+    if time_since_last < 10 {
+        warn!("Last measurement less than 10 sec ago. Not measuring this time!");
+        return;
+    }
+
     let window = window_weak.upgrade().unwrap();
+
+    window.set_in_progress("Messung läuft".into());
 
     let status = pas_co2.get_status().unwrap();
     info!("Status: {}", status);
+
+    pas_co2.clear_status().unwrap();
 
     let status_text = "Ready: ".to_owned()
         + if status.ready { "Yes" } else { "No" }
@@ -625,6 +723,8 @@ fn measure_co2(pas_co2: &mut PasCo2<I2c<I2C1, Async>>, window_weak: Weak<MainWin
         _ => slint::Color::from_rgb_u8(255, 0, 0),
     };
     window.set_background_color(color);
+
+    window.set_in_progress("".into());
 }
 
 slint::include_modules!();

@@ -45,6 +45,8 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "d
 
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
+embedded-hal-bus = "0.2.0"
+
 static_cell = "2.1"
 
 stm32-fmc = { version = "0.3", default-features = false, features = [
