@@ -14,6 +14,8 @@ export component MainWindow inherits Window {
     in property <int> time_since_last: 0;
 
     callback start_measurement();
+    callback brightness_increase();
+    callback brightness_decrease();
 
     border := Rectangle {
         width: 100%;
@@ -64,6 +66,29 @@ export component MainWindow inherits Window {
         clicked => {
             debug("start_measurement()");
             root.start_measurement();
+        }
+    }
+
+    HorizontalLayout {
+        height: 60px;
+        width: 150px;
+        spacing: 20px;
+        y: 360px;
+        x: 590px;
+        Button {
+            text: "+";
+            clicked => {
+                brightness_increase();
+                debug("brightness_increase()");
+            }
+        }
+
+        Button {
+            text: "--";
+            clicked => {
+                brightness_decrease();
+                debug("brightness_decrease()");
+            }
         }
     }
 }

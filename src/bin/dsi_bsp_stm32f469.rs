@@ -23,16 +23,16 @@ use embassy_executor::Spawner;
 use embedded_hal_bus::i2c::RefCellDevice;
 use slint::{ComponentHandle, Weak};
 
+use core::sync::atomic::AtomicU8;
 use core::{cell::RefCell, sync::atomic::AtomicI32};
 
 use defmt::*;
 use embassy_stm32::{
-    bind_interrupts,
     exti::ExtiInput,
     gpio::Pull,
     gpio::{Level, Output, Speed},
-    i2c::{self, I2c},
-    peripherals::{self, DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
+    i2c::I2c,
+    peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
             AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth,
@@ -55,12 +55,8 @@ use embedded_hal::delay::DelayNs;
 
 use {defmt_rtt as _, panic_probe as _};
 
-bind_interrupts!(struct Irqs {
-    I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
-    I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
-});
-
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
+static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -267,7 +263,7 @@ impl slint::platform::Platform for StmBackend<'_> {
         self.window.replace(Some(window.clone()));
         Ok(window)
     }
-    
+
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let inner = &mut *self.inner.borrow_mut();
 
@@ -303,6 +299,18 @@ impl slint::platform::Platform for StmBackend<'_> {
 
                     inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
                     core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
+
+                    let screen_brightness =
+                        SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
+                    debug!("Setting screen brightness to {}", screen_brightness);
+
+                    let write_closure =
+                        |address: u8, data: &[u8]| inner._dsi.write_cmd(0, address, data).unwrap();
+
+                    embedded_dal::drivers::nt35510::set_brightness(
+                        write_closure,
+                        screen_brightness,
+                    );
                 });
 
                 // handle touch event
@@ -641,6 +649,20 @@ async fn main(_spawner: Spawner) {
 
     window.on_start_measurement(move || measure_co2(&mut pas_co2, window_weak.clone()));
 
+    window.on_brightness_increase(move || {
+        let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
+        if current < 240 {
+            SCREEN_BRIGHTNESS.store(current + 10, core::sync::atomic::Ordering::Release);
+        }
+    });
+
+    window.on_brightness_decrease(move || {
+        let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
+        if current > 20 {
+            SCREEN_BRIGHTNESS.store(current - 10, core::sync::atomic::Ordering::Release);
+        }
+    });
+
     let window_weak = window.as_weak();
 
     let co2_measurement_timer = slint::Timer::default();
@@ -722,7 +744,6 @@ fn measure_co2(
         _ => slint::Color::from_rgb_u8(255, 0, 0),
     };
     window.set_background_color(color);
-
 }
 
 slint::include_modules!();

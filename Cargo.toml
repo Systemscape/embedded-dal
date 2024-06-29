@@ -75,8 +75,8 @@ cortex-m-rt = "0.7.0"
 
 num_enum = { version = "0.7", default-features = false }
 
-#pas-co2-rs = { version = "0", git = "ssh://git@github.com/Systemscape/pas-co2-rs.git", rev = "b5cbe791cbf010f9ef7949f310406b21b3a81559", features = ["defmt",] }
-pas-co2-rs = { version = "0", path = "../pas-co2-rs", features = ["defmt",] }
+#pas-co2-rs = { version = "0.1.0-beta.1", git = "ssh://git@github.com/Systemscape/pas-co2-rs.git", features = [    "defmt",] }
+pas-co2-rs = { path = "../pas-co2-rs", features = ["defmt"] }
 
 
 [build-dependencies]
