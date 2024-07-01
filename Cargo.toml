@@ -20,21 +20,20 @@ stm32f469 = ["dep:embedded-alloc"]
 
 
 [dependencies]
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = [
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
     "defmt",
     "stm32f469ni",
     "unstable-pac",
     "time-driver-any",
     "exti",
-    "chrono",
 ] }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = [
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
 ] }
 
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "daaaf50298144a245d026e70f4fa3c6eb856276a", features = [
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
     "task-arena-size-32768",
     "arch-cortex-m",
     "executor-thread",
@@ -43,9 +42,20 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "d
     "integrated-timers",
 ] }
 
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca" }
+
+
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+    "defmt",
+] }
+
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+    "defmt",
+] }
+
+
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
-embedded-hal-bus = "0.2.0"
 
 static_cell = "2.1"
 

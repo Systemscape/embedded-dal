@@ -7,7 +7,12 @@ use alloc::{borrow::ToOwned, boxed::Box};
 
 use cortex_m::peripheral::SCB;
 
+use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_stm32::mode::Blocking;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::NoopMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::Duration;
 use embedded_dal::drivers::ft6x36::Ft6x36;
 use embedded_dal::{
@@ -20,11 +25,13 @@ use embedded_dal::{
 
 use embassy_executor::Spawner;
 
-use embedded_hal_bus::i2c::RefCellDevice;
 use pas_co2_rs::regs::{MeasurementMode, OperatingMode};
-use slint::{ComponentHandle, Weak};
+use slint::platform::EventLoopProxy;
+use slint::{ComponentHandle, EventLoopError, Weak};
+use static_cell::StaticCell;
 
-use core::sync::atomic::{AtomicBool, AtomicU8};
+use core::borrow::BorrowMut;
+use core::sync::atomic::AtomicU8;
 use core::{cell::RefCell, sync::atomic::AtomicI32};
 
 use defmt::*;
@@ -33,7 +40,7 @@ use embassy_stm32::{
     gpio::Pull,
     gpio::{Level, Output, Speed},
     i2c::I2c,
-    peripherals::{DSIHOST, EXTI5, I2C1, LTDC, PG6, PH7, PJ2, PJ5},
+    peripherals::{DSIHOST, EXTI5, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
             AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth,
@@ -55,7 +62,21 @@ use {defmt_rtt as _, panic_probe as _};
 
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
-static FORCE_COMPENSATION: AtomicBool = AtomicBool::new(false);
+
+enum Co2SensorCommand {
+    StartMeasurement,
+    ForceCalibration(i16),
+}
+
+static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
+
+enum Event {
+    Quit,
+    Event(Box<dyn FnOnce() + Send>),
+}
+static EVENT_LOOP_QUEUE: Channel<CriticalSectionRawMutex, Event, 100> = Channel::new();
+
+static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Blocking>>>> = StaticCell::new();
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -95,7 +116,7 @@ struct StmBackendInner<'a> {
     _reset: Output<'a>,
     ltdc: Ltdc<'a>,
     _dsi: Dsi<'a>,
-    touch_screen: Ft6x36<RefCellDevice<'a, I2c<'a, I2C1, Blocking>>>,
+    touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Blocking>>>,
 }
 
 struct StmBackend<'a> {
@@ -108,7 +129,7 @@ impl<'a> StmBackend<'a> {
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
-        i2c: RefCellDevice<'a, I2c<'a, I2C1, Blocking>>,
+        i2c: I2cDevice<'a, NoopRawMutex, I2c<'static, Blocking>>,
         _pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
@@ -263,6 +284,25 @@ impl slint::platform::Platform for StmBackend<'_> {
         Ok(window)
     }
 
+    fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
+        struct Proxy;
+        impl EventLoopProxy for Proxy {
+            fn quit_event_loop(&self) -> Result<(), EventLoopError> {
+                EVENT_LOOP_QUEUE.try_send(Event::Quit);
+                Ok(())
+            }
+
+            fn invoke_from_event_loop(
+                &self,
+                event: Box<dyn FnOnce() + Send>,
+            ) -> Result<(), EventLoopError> {
+                EVENT_LOOP_QUEUE.try_send(Event::Event(event));
+                Ok(())
+            }
+        }
+        Some(Box::new(Proxy))
+    }
+
     fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
         let inner = &mut *self.inner.borrow_mut();
 
@@ -287,6 +327,12 @@ impl slint::platform::Platform for StmBackend<'_> {
                 LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
             ));
         loop {
+            match EVENT_LOOP_QUEUE.try_receive() {
+                Ok(Event::Quit) => return Ok(()),
+                Ok(Event::Event(e)) => e(),
+                Err(_) => (),
+            }
+
             slint::platform::update_timers_and_animations();
 
             if let Some(window) = self.window.borrow().clone() {
@@ -350,8 +396,6 @@ impl slint::platform::Platform for StmBackend<'_> {
                     }
                 }
             }
-
-            // FIXME: cortex_m::asm::wfe();
         }
     }
 
@@ -510,7 +554,7 @@ async fn main(_spawner: Spawner) {
     };
 
     // MT25QL128ABA1EW9-0SIT according to schetmatic
-    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bk1(
+    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bank1(
         p.QUADSPI, p.PF8, p.PF9, p.PF7, p.PF6, p.PF10, p.PB6, p.DMA2_CH7, config,
     );
 
@@ -599,41 +643,17 @@ async fn main(_spawner: Spawner) {
     config.sda_pullup = true;
     config.scl_pullup = true;
 
-    static i2c_static: static_cell::StaticCell<RefCell<I2c<I2C1, Blocking>>> =
-        static_cell::StaticCell::new();
-
-    //static pas_co2_stat: static_cell::StaticCell<PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>> = static_cell::StaticCell::new();
-
     let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), config);
 
-    let i2c: &'static mut RefCell<I2c<I2C1, Blocking>> = i2c_static.init(RefCell::new(i2c));
+    let i2c_bus = NoopMutex::new(RefCell::new(i2c));
+    let i2c_bus = I2C_BUS.init(i2c_bus);
 
-    //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
-    let mut pas_co2 = PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c));
-
-    info!("Status: {}", pas_co2.get_status().unwrap());
-
-    let mut mode = MeasurementMode::default();
-    mode.operating_mode = OperatingMode::Idle;
-    pas_co2.set_measurement_mode(mode).unwrap();
-
-    let pressure: u16 = 950; //hPa
-
-    pas_co2.set_pressure_compensation(pressure).unwrap();
-
-    embassy_time::Delay {}.delay_ms(1000);
+    let i2c_dev1 = I2cDevice::new(i2c_bus);
 
     // ### Init Backend ###
     info!("Init StmBackend");
     slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST,
-        p.LTDC,
-        RefCellDevice::new(i2c),
-        p.PG6,
-        p.PJ2,
-        p.PJ5,
-        p.PH7,
-        p.EXTI5, //fb1, fb2,
+        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
         cp.SCB,
     )))
     .expect("backend already initialized");
@@ -641,15 +661,14 @@ async fn main(_spawner: Spawner) {
     let window = MainWindow::new().unwrap();
 
     let window_weak = window.as_weak();
+    slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone())).unwrap();
 
-    measure_co2(&mut pas_co2, window_weak.clone());
+    window.on_start_measurement(|| {
+        START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
+    });
 
-    window.on_start_measurement(move || measure_co2(&mut pas_co2, window_weak.clone()));
-
-    let window_weak = window.as_weak();
     window.on_force_compensation(move || {
-        FORCE_COMPENSATION.store(true, core::sync::atomic::Ordering::Release);
-        window_weak.clone().unwrap().invoke_start_measurement()
+        START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::ForceCalibration(500))
     });
 
     window.on_brightness_increase(move || {
@@ -691,78 +710,93 @@ async fn main(_spawner: Spawner) {
     window.run().unwrap();
 }
 
-fn measure_co2(
-    pas_co2: &mut PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>,
-    window_weak: Weak<MainWindow>,
-) {
-    if FORCE_COMPENSATION.load(core::sync::atomic::Ordering::Acquire) {
-        warn!("Performing forced compensation!");
-        pas_co2
-            .do_forced_compensation(420, embassy_time::Delay)
-            .unwrap();
+async fn measure_co2(i2c: impl embedded_hal::i2c::I2c + 'static, window_weak: Weak<MainWindow>) {
+    //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
+    let mut pas_co2 = PasCo2::new(i2c);
 
-        FORCE_COMPENSATION.store(false, core::sync::atomic::Ordering::Release);
-        return;
-    }
+    info!("Status: {}", pas_co2.get_status().unwrap());
 
-    // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
-    let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
-    let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
-    if time_since_last < 10 && time_last != -1 {
-        warn!("Last measurement less than 10 sec ago. Not measuring this time!");
-        return;
-    }
+    let mut mode = MeasurementMode::default();
+    mode.operating_mode = OperatingMode::Idle;
+    pas_co2.set_measurement_mode(mode).unwrap();
 
-    let window = window_weak.upgrade().unwrap();
+    let pressure: u16 = 950; //hPa
 
-    let status = pas_co2.get_status().unwrap();
-    info!("Status: {}", status);
+    pas_co2.set_pressure_compensation(pressure).unwrap();
 
-    pas_co2.clear_status().unwrap();
+    embassy_time::Delay {}.delay_ms(1000);
 
-    let status_text = "Ready: ".to_owned()
-        + if status.ready { "Yes" } else { "No" }
-        + ", Temp.: "
-        + if status.temperature_error {
-            "Error"
-        } else {
-            "OK"
+    loop {
+        info!("Entering measure_co2 loop");
+        match START_MEASUREMENT_SIGNAL.wait().await {
+            Co2SensorCommand::ForceCalibration(val) => {
+                warn!("Performing forced compensation!");
+                pas_co2
+                    .do_forced_compensation(val, embassy_time::Delay)
+                    .unwrap();
+            }
+            Co2SensorCommand::StartMeasurement => {
+                // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
+                let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
+                let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
+                if time_since_last < 10 && time_last != -1 {
+                    warn!("Last measurement less than 10 sec ago. Not measuring this time!");
+                    return;
+                }
+
+                let window = window_weak.upgrade().unwrap();
+
+                let status = pas_co2.get_status().unwrap();
+                info!("Status: {}", status);
+
+                pas_co2.clear_status().unwrap();
+
+                let status_text = "Ready: ".to_owned()
+                    + if status.ready { "Yes" } else { "No" }
+                    + ", Temp.: "
+                    + if status.temperature_error {
+                        "Error"
+                    } else {
+                        "OK"
+                    }
+                    + ", Voltage: "
+                    + if status.voltage_error { "Error" } else { "OK" }
+                    + ", Comm.: "
+                    + if status.communication_error {
+                        "Error"
+                    } else {
+                        "OK"
+                    };
+
+                window.set_status_text(status_text.into());
+
+                pas_co2.start_measurement().unwrap();
+                TIME_LAST.store(
+                    embassy_time::Instant::now().as_secs() as i32,
+                    core::sync::atomic::Ordering::Relaxed,
+                );
+                embassy_time::Delay.delay_ms(1150);
+
+                let co2_ppm = pas_co2.get_co2_ppm().unwrap();
+
+                info!("CO2 PPM: {}", co2_ppm);
+                window.set_co2_ppm(co2_ppm.into());
+
+                let color = match co2_ppm {
+                    0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
+                    701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
+                    _ => slint::Color::from_rgb_u8(255, 0, 0),
+                };
+                window.set_background_color(color);
+            }
         }
-        + ", Voltage: "
-        + if status.voltage_error { "Error" } else { "OK" }
-        + ", Comm.: "
-        + if status.communication_error {
-            "Error"
-        } else {
-            "OK"
-        };
-
-    window.set_status_text(status_text.into());
-
-    pas_co2.start_measurement().unwrap();
-    TIME_LAST.store(
-        embassy_time::Instant::now().as_secs() as i32,
-        core::sync::atomic::Ordering::Relaxed,
-    );
-    embassy_time::Delay {}.delay_ms(1150);
-
-    let co2_ppm = pas_co2.get_co2_ppm().unwrap();
-
-    info!("CO2 PPM: {}", co2_ppm);
-    window.set_co2_ppm(co2_ppm.into());
-
-    let color = match co2_ppm {
-        0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
-        701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
-        _ => slint::Color::from_rgb_u8(255, 0, 0),
-    };
-    window.set_background_color(color);
+    }
 }
 
 slint::include_modules!();
 
 #[cortex_m_rt::exception]
-unsafe fn HardFault(ef: &cortex_m_rt::ExceptionFrame) -> ! {
+unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
     cortex_m::asm::delay(500_000_000);
     cortex_m::peripheral::SCB::sys_reset();
 }
