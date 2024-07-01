@@ -1832,6 +1832,7 @@ version = "0.1.0-beta.1"
 dependencies = [
  "defmt",
  "embedded-hal 1.0.0",
+ "num_enum",
 ]
 
 [[package]]

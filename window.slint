@@ -16,6 +16,7 @@ export component MainWindow inherits Window {
     callback start_measurement();
     callback brightness_increase();
     callback brightness_decrease();
+    callback force_compensation();
 
     border := Rectangle {
         width: 100%;
@@ -89,6 +90,18 @@ export component MainWindow inherits Window {
                 brightness_decrease();
                 debug("brightness_decrease()");
             }
+        }
+    }
+
+    Button {
+        text: "FORCE COMP.";
+        height: 50px;
+        x: 600px;
+        y: 70px;
+
+        clicked => {
+            force_compensation();
+            debug("force_compensation()");
         }
     }
 }

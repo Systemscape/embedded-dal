@@ -21,9 +21,10 @@ use embedded_dal::{
 use embassy_executor::Spawner;
 
 use embedded_hal_bus::i2c::RefCellDevice;
+use pas_co2_rs::regs::{MeasurementMode, OperatingMode};
 use slint::{ComponentHandle, Weak};
 
-use core::sync::atomic::AtomicU8;
+use core::sync::atomic::{AtomicBool, AtomicU8};
 use core::{cell::RefCell, sync::atomic::AtomicI32};
 
 use defmt::*;
@@ -46,10 +47,7 @@ use embassy_stm32::{
     time::{mhz, Hertz},
 };
 
-use pas_co2_rs::{
-    regs::{measurement_mode::OperatingMode, MeasurementMode, PressureCompensation},
-    PasCo2,
-};
+use pas_co2_rs::PasCo2;
 
 use embedded_hal::delay::DelayNs;
 
@@ -57,6 +55,7 @@ use {defmt_rtt as _, panic_probe as _};
 
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
+static FORCE_COMPENSATION: AtomicBool = AtomicBool::new(false);
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -612,7 +611,7 @@ async fn main(_spawner: Spawner) {
     //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
     let mut pas_co2 = PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c));
 
-    info!("Status: {}", pas_co2.get_status());
+    info!("Status: {}", pas_co2.get_status().unwrap());
 
     let mut mode = MeasurementMode::default();
     mode.operating_mode = OperatingMode::Idle;
@@ -620,9 +619,7 @@ async fn main(_spawner: Spawner) {
 
     let pressure: u16 = 950; //hPa
 
-    pas_co2
-        .set_pressure_compensation(PressureCompensation(pressure))
-        .unwrap();
+    pas_co2.set_pressure_compensation(pressure).unwrap();
 
     embassy_time::Delay {}.delay_ms(1000);
 
@@ -648,6 +645,12 @@ async fn main(_spawner: Spawner) {
     measure_co2(&mut pas_co2, window_weak.clone());
 
     window.on_start_measurement(move || measure_co2(&mut pas_co2, window_weak.clone()));
+
+    let window_weak = window.as_weak();
+    window.on_force_compensation(move || {
+        FORCE_COMPENSATION.store(true, core::sync::atomic::Ordering::Release);
+        window_weak.clone().unwrap().invoke_start_measurement()
+    });
 
     window.on_brightness_increase(move || {
         let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
@@ -692,6 +695,16 @@ fn measure_co2(
     pas_co2: &mut PasCo2<RefCellDevice<I2c<I2C1, Blocking>>>,
     window_weak: Weak<MainWindow>,
 ) {
+    if FORCE_COMPENSATION.load(core::sync::atomic::Ordering::Acquire) {
+        warn!("Performing forced compensation!");
+        pas_co2
+            .do_forced_compensation(420, embassy_time::Delay)
+            .unwrap();
+
+        FORCE_COMPENSATION.store(false, core::sync::atomic::Ordering::Release);
+        return;
+    }
+
     // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
     let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
     let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
