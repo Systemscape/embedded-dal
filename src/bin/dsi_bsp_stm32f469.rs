@@ -38,7 +38,6 @@ use embassy_sync::{
         raw::{CriticalSectionRawMutex, NoopRawMutex},
         NoopMutex,
     },
-    channel::Channel,
     signal::Signal,
 };
 use embassy_time::Duration;
@@ -83,7 +82,6 @@ static ALLOCATOR: Heap = Heap::empty();
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
 static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
-static EVENT_LOOP_QUEUE: Channel<CriticalSectionRawMutex, Event, 100> = Channel::new();
 static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Async>>>> = StaticCell::new();
 
 #[link_section = ".frame_buffer"]
@@ -107,15 +105,14 @@ enum Co2SensorCommand {
     ForceCalibration(i16),
 }
 
-enum Event {
-    Quit,
-    Event(Box<dyn FnOnce() + Send>),
-}
-
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
 });
+
+struct StmBackend {
+    window: RefCell<Option<Rc<slint::platform::software_renderer::MinimalSoftwareWindow>>>,
+}
 
 struct StmBackendInner<'a> {
     scb: cortex_m::peripheral::SCB,
@@ -124,16 +121,11 @@ struct StmBackendInner<'a> {
     ltdc: Ltdc<'a>,
     dsi: Dsi<'a>,
     touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>>,
+    exti: ExtiInput<'a>,
 }
 
-struct StmBackend<'a> {
-    window: RefCell<Option<Rc<slint::platform::software_renderer::MinimalSoftwareWindow>>>,
-    _exti_input: ExtiInput<'a>,
-}
-
-impl<'a> StmBackend<'a> {
+impl<'a> StmBackendInner<'a> {
     fn init(
-        window: Rc<MinimalSoftwareWindow>,
         dsihost: DSIHOST,
         ltdc: LTDC,
         i2c: I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>,
@@ -143,7 +135,7 @@ impl<'a> StmBackend<'a> {
         ph7: PH7,
         exti5: EXTI5,
         scb: SCB,
-    ) -> (Self, StmBackendInner<'a>) {
+    ) -> StmBackendInner<'a> {
         /*
            BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
         */
@@ -266,23 +258,18 @@ impl<'a> StmBackend<'a> {
         ######################################
         */
 
-        (
-            Self {
-                window: RefCell::from(Some(window)),
-                _exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
-            },
-            StmBackendInner {
-                scb,
-                _reset: reset,
-                ltdc,
-                dsi,
-                touch_screen,
-            },
-        )
+        Self {
+            scb,
+            _reset: reset,
+            ltdc,
+            dsi,
+            touch_screen,
+            exti: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
+        }
     }
 }
 
-impl slint::platform::Platform for StmBackend<'_> {
+impl slint::platform::Platform for StmBackend {
     fn create_window_adapter(
         &self,
     ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
@@ -291,29 +278,6 @@ impl slint::platform::Platform for StmBackend<'_> {
         );
         self.window.replace(Some(window.clone()));
         Ok(window)
-    }
-
-    fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
-        struct Proxy;
-        impl EventLoopProxy for Proxy {
-            fn quit_event_loop(&self) -> Result<(), EventLoopError> {
-                let _ = EVENT_LOOP_QUEUE
-                    .try_send(Event::Quit)
-                    .map_err(|_| error!("try_send failed in quit_event_loop"));
-                Ok(())
-            }
-
-            fn invoke_from_event_loop(
-                &self,
-                event: Box<dyn FnOnce() + Send>,
-            ) -> Result<(), EventLoopError> {
-                let _ = EVENT_LOOP_QUEUE
-                    .try_send(Event::Event(event))
-                    .map_err(|_| error!("try_send failed in invoke_from_event_loop"));
-                Ok(())
-            }
-        }
-        Some(Box::new(Proxy))
     }
 
     fn duration_since_start(&self) -> core::time::Duration {
@@ -332,7 +296,7 @@ async fn main(spawner: Spawner) {
         SystemClock_Config()
     */
 
-    let mut config = get_board_config();
+    let config = get_board_config();
 
     info!("Init Embassy...");
 
@@ -548,23 +512,18 @@ async fn main(spawner: Spawner) {
 
     let i2c_dev1 = I2cDevice::new(i2c_bus);
 
+    let inner = StmBackendInner::init(
+        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
+        cp.SCB,
+    );
+
     // ### Init Backend ###
     info!("Init StmBackend");
     let sw_window = MinimalSoftwareWindow::new(Default::default());
-
-    let (backend, inner) = StmBackend::init(
-        sw_window.clone(),
-        p.DSIHOST,
-        p.LTDC,
-        i2c_dev1,
-        p.PG6,
-        p.PJ2,
-        p.PJ5,
-        p.PH7,
-        p.EXTI5, //fb1, fb2,
-        cp.SCB,
-    );
-    slint::platform::set_platform(Box::new(backend)).expect("backend already initialized");
+    slint::platform::set_platform(Box::new(StmBackend {
+        window: RefCell::new(Some(sw_window.clone())),
+    }))
+    .expect("backend already initialized");
 
     let window = MainWindow::new().unwrap();
 
@@ -572,6 +531,7 @@ async fn main(spawner: Spawner) {
     spawner
         .spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()))
         .unwrap();
+    //slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()));
 
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
@@ -620,14 +580,9 @@ async fn main(spawner: Spawner) {
         },
     );
 
-    slint_event_loop(sw_window, inner).await
+    slint_event_loop(sw_window, inner);
 
     //window.run().unwrap();
-}
-
-#[embassy_executor::task]
-async fn window_run(window: MainWindow) {
-    window.run().unwrap();
 }
 
 #[embassy_executor::task]
@@ -719,10 +674,8 @@ async fn measure_co2(
 }
 
 //#[embassy_executor::task]
-async fn slint_event_loop(
-    mut sw_window: Rc<MinimalSoftwareWindow>,
-    mut inner: StmBackendInner<'static>,
-) {
+//async fn slint_event_loop(
+fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) {
     info!("Entering slint_event_loop");
     //let inner = &mut *self.inner.borrow_mut();
 
@@ -740,37 +693,28 @@ async fn slint_event_loop(
     let mut work_fb: &mut [TargetPixel] = fb2;
 
     let mut last_touch = None;
-    sw_window
-        .borrow_mut()
-        .as_ref()
-        .set_size(slint::PhysicalSize::new(
-            LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
-            LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
-        ));
+    sw_window.set_size(slint::PhysicalSize::new(
+        LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
+        LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
+    ));
 
-    info!("Entering slint_event_loop mainloop");
+    sw_window.request_redraw();
+
     loop {
+        info!("Entering slint_event_loop mainloop");
         slint::platform::update_timers_and_animations();
 
-        match EVENT_LOOP_QUEUE.try_receive() {
-            Ok(Event::Quit) => return,
-            Ok(Event::Event(e)) => e(),
-            Err(_) => (),
-        }
-
-        let window = sw_window.borrow_mut();
-
-        window.draw_if_needed(|renderer| {
+        sw_window.draw_if_needed(|renderer| {
             info!("start rendering...");
             renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
-            debug!("... done rendering");
+            info!("... done rendering");
             inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
             inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
             core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
 
             let screen_brightness = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
-            debug!("Setting screen brightness to {}", screen_brightness);
+            info!("Setting screen brightness to {}", screen_brightness);
 
             let write_closure =
                 |address: u8, data: &[u8]| unwrap!(inner.dsi.write_cmd(0, address, data));
@@ -789,7 +733,7 @@ async fn slint_event_loop(
         {
             Some(state) => {
                 let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                    .to_logical(window.scale_factor());
+                    .to_logical(sw_window.scale_factor());
 
                 //info!("Got Touch: {:#?}", state);
                 Some(match last_touch.replace(position) {
@@ -806,12 +750,21 @@ async fn slint_event_loop(
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
 
-            window.dispatch_event(event);
+                sw_window.dispatch_event(event);
 
             // removes hover state on widgets^
             if is_pointer_release_event {
-                window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+                sw_window.dispatch_event(slint::platform::WindowEvent::PointerExited);
             }
+            continue;
+        }
+
+        // Try to put the MCU to sleep
+        if !sw_window.has_active_animations() {
+            if let Some(duration) = slint::platform::duration_until_next_timer_update() {
+                //embassy_time::Timer::after(duration.try_into().unwrap()).await;
+            }
+            //inner.exti.wait_for_falling_edge().await
         }
     }
 }

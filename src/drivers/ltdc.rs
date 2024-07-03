@@ -1,7 +1,11 @@
 use cortex_m::asm;
-use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Depol, Hspol, Pcpol, Pf, Vbr, Vspol};
-use embassy_stm32::pac::LTDC;
-use embassy_stm32::peripherals::LTDC;
+use embassy_stm32::{
+    pac::{
+        ltdc::vals::{Bf1, Bf2, Depol, Hspol, Pcpol, Pf, Vbr, Vspol},
+        LTDC,
+    },
+    peripherals::LTDC,
+};
 
 pub struct Window {
     pub x0: u16,
