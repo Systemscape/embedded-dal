@@ -2,44 +2,24 @@
 #![no_main]
 
 extern crate alloc;
-use alloc::rc::Rc;
-use alloc::{borrow::ToOwned, boxed::Box};
-
-use cortex_m::peripheral::SCB;
-
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
-use embassy_stm32::mode::Blocking;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
-use embassy_sync::blocking_mutex::NoopMutex;
-use embassy_sync::channel::Channel;
-use embassy_sync::signal::Signal;
-use embassy_time::Duration;
-use embedded_dal::drivers::ft6x36::Ft6x36;
-use embedded_dal::{
-    config::{Dimensions, Orientation},
-    drivers::{
-        dsi::{self, Dsi},
-        ltdc::{self, Ltdc},
-    },
+use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
+use core::{
+    borrow::BorrowMut,
+    cell::RefCell,
+    sync::atomic::{AtomicI32, AtomicU8},
 };
-
-use embassy_executor::Spawner;
-
-use pas_co2_rs::regs::{MeasurementMode, OperatingMode};
-use slint::platform::EventLoopProxy;
-use slint::{ComponentHandle, EventLoopError, Weak};
-use static_cell::StaticCell;
-
-use core::borrow::BorrowMut;
-use core::sync::atomic::AtomicU8;
-use core::{cell::RefCell, sync::atomic::AtomicI32};
-
+use cortex_m::peripheral::SCB;
 use defmt::*;
+use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
+use embassy_executor::Spawner;
 use embassy_stm32::{
+    bind_interrupts,
     exti::ExtiInput,
-    gpio::Pull,
-    gpio::{Level, Output, Speed},
+    gpio::{Level, Output, Pull, Speed},
+    i2c,
     i2c::I2c,
+    mode::Async,
+    peripherals,
     peripherals::{DSIHOST, EXTI5, LTDC, PG6, PH7, PJ2, PJ5},
     qspi::{
         enums::{
@@ -48,35 +28,43 @@ use embassy_stm32::{
         Config, TransferConfig,
     },
     rcc::{
-        AHBPrescaler, APBPrescaler, PllMul, PllPDiv, PllPreDiv, PllQDiv, PllRDiv, PllSource, Sysclk,
+        AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv,
+        PllRDiv, PllSource, Sysclk,
     },
-    rcc::{Hse, HseMode, Pll},
     time::{mhz, Hertz},
 };
+use embassy_sync::{
+    blocking_mutex::{
+        raw::{CriticalSectionRawMutex, NoopRawMutex},
+        NoopMutex,
+    },
+    channel::Channel,
+    signal::Signal,
+};
+use embassy_time::Duration;
+use embedded_dal::{
+    config::{Dimensions, Orientation},
+    drivers::{
+        dsi::{self, Dsi},
+        ft6x36::Ft6x36,
+        ltdc::{self, Ltdc},
+    },
+};
+use embedded_hal_async::delay::DelayNs;
+use pas_co2_rs::{
+    regs::{MeasurementMode, OperatingMode},
+    PasCo2,
+};
+use slint::{
+    platform::{software_renderer::MinimalSoftwareWindow, EventLoopProxy},
+    ComponentHandle, EventLoopError, Weak,
+};
+use static_cell::StaticCell;
 
-use pas_co2_rs::PasCo2;
+use defmt_rtt as _;
+use panic_probe as _;
 
-use embedded_hal::delay::DelayNs;
-
-use {defmt_rtt as _, panic_probe as _};
-
-static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
-static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
-
-enum Co2SensorCommand {
-    StartMeasurement,
-    ForceCalibration(i16),
-}
-
-static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
-
-enum Event {
-    Quit,
-    Event(Box<dyn FnOnce() + Send>),
-}
-static EVENT_LOOP_QUEUE: Channel<CriticalSectionRawMutex, Event, 100> = Channel::new();
-
-static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Blocking>>>> = StaticCell::new();
+pub type TargetPixel = embedded_dal::pixels::ARGB8888;
 
 const LCD_ORIENTATION: Orientation = embedded_dal::config::Orientation::Landscape;
 const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
@@ -84,7 +72,19 @@ const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
 const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
     * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
 
-pub type TargetPixel = embedded_dal::pixels::ARGB8888;
+use embedded_alloc::Heap;
+
+const HEAP_SIZE: usize = 250 * 1024;
+static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+
+#[global_allocator]
+static ALLOCATOR: Heap = Heap::empty();
+
+static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
+static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
+static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
+static EVENT_LOOP_QUEUE: Channel<CriticalSectionRawMutex, Event, 100> = Channel::new();
+static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Async>>>> = StaticCell::new();
 
 #[link_section = ".frame_buffer"]
 static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
@@ -102,41 +102,48 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     b: 0,
 }; NUM_PIXELS];
 
-use embedded_alloc::Heap;
+enum Co2SensorCommand {
+    StartMeasurement,
+    ForceCalibration(i16),
+}
 
-const HEAP_SIZE: usize = 250 * 1024;
-static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+enum Event {
+    Quit,
+    Event(Box<dyn FnOnce() + Send>),
+}
 
-#[global_allocator]
-static ALLOCATOR: Heap = Heap::empty();
+bind_interrupts!(struct Irqs {
+    I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
+    I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
+});
 
 struct StmBackendInner<'a> {
     scb: cortex_m::peripheral::SCB,
     /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
     _reset: Output<'a>,
     ltdc: Ltdc<'a>,
-    _dsi: Dsi<'a>,
-    touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Blocking>>>,
+    dsi: Dsi<'a>,
+    touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>>,
 }
 
 struct StmBackend<'a> {
     window: RefCell<Option<Rc<slint::platform::software_renderer::MinimalSoftwareWindow>>>,
     _exti_input: ExtiInput<'a>,
-    inner: RefCell<StmBackendInner<'a>>,
 }
 
 impl<'a> StmBackend<'a> {
     fn init(
+        window: Rc<MinimalSoftwareWindow>,
         dsihost: DSIHOST,
         ltdc: LTDC,
-        i2c: I2cDevice<'a, NoopRawMutex, I2c<'static, Blocking>>,
+        i2c: I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>,
         _pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
         ph7: PH7,
         exti5: EXTI5,
         scb: SCB,
-    ) -> Self {
+    ) -> (Self, StmBackendInner<'a>) {
         /*
            BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
         */
@@ -166,7 +173,7 @@ impl<'a> StmBackend<'a> {
         );
 
         debug!("Init touch_screen");
-        touch_screen.init().unwrap();
+        unwrap!(touch_screen.init());
         touch_screen.set_orientation(match LCD_ORIENTATION {
             Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
             Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
@@ -177,7 +184,7 @@ impl<'a> StmBackend<'a> {
             None => warn!("No info"),
         }
 
-        let diag = touch_screen.get_diagnostics().unwrap();
+        let diag = unwrap!(touch_screen.get_diagnostics());
         info!("Got touch screen diag: {:#?}", diag);
 
         info!("Get touch event: {:#?}", touch_screen.get_touch_event());
@@ -217,7 +224,7 @@ impl<'a> StmBackend<'a> {
         */
 
         // FIXME: This should probably be done with a trait or so...
-        let mut write_closure = |address: u8, data: &[u8]| dsi.write_cmd(0, address, data).unwrap();
+        let mut write_closure = |address: u8, data: &[u8]| unwrap!(dsi.write_cmd(0, address, data));
 
         embedded_dal::drivers::nt35510::init(
             &mut write_closure,
@@ -259,17 +266,19 @@ impl<'a> StmBackend<'a> {
         ######################################
         */
 
-        Self {
-            window: RefCell::default(),
-            _exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
-            inner: RefCell::new(StmBackendInner {
-                scb: scb,
+        (
+            Self {
+                window: RefCell::from(Some(window)),
+                _exti_input: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
+            },
+            StmBackendInner {
+                scb,
                 _reset: reset,
                 ltdc,
-                _dsi: dsi,
+                dsi,
                 touch_screen,
-            }),
-        }
+            },
+        )
     }
 }
 
@@ -288,7 +297,9 @@ impl slint::platform::Platform for StmBackend<'_> {
         struct Proxy;
         impl EventLoopProxy for Proxy {
             fn quit_event_loop(&self) -> Result<(), EventLoopError> {
-                EVENT_LOOP_QUEUE.try_send(Event::Quit);
+                let _ = EVENT_LOOP_QUEUE
+                    .try_send(Event::Quit)
+                    .map_err(|_| error!("try_send failed in quit_event_loop"));
                 Ok(())
             }
 
@@ -296,107 +307,13 @@ impl slint::platform::Platform for StmBackend<'_> {
                 &self,
                 event: Box<dyn FnOnce() + Send>,
             ) -> Result<(), EventLoopError> {
-                EVENT_LOOP_QUEUE.try_send(Event::Event(event));
+                let _ = EVENT_LOOP_QUEUE
+                    .try_send(Event::Event(event))
+                    .map_err(|_| error!("try_send failed in invoke_from_event_loop"));
                 Ok(())
             }
         }
         Some(Box::new(Proxy))
-    }
-
-    fn run_event_loop(&self) -> Result<(), slint::PlatformError> {
-        let inner = &mut *self.inner.borrow_mut();
-
-        // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
-        let (fb1, fb2) = unsafe {
-            (
-                &mut *core::ptr::addr_of_mut!(FB1),
-                &mut *core::ptr::addr_of_mut!(FB2),
-            )
-        };
-
-        let mut displayed_fb: &mut [TargetPixel] = fb1;
-        let mut work_fb: &mut [TargetPixel] = fb2;
-
-        let mut last_touch = None;
-        self.window
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .set_size(slint::PhysicalSize::new(
-                LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
-                LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
-            ));
-        loop {
-            match EVENT_LOOP_QUEUE.try_receive() {
-                Ok(Event::Quit) => return Ok(()),
-                Ok(Event::Event(e)) => e(),
-                Err(_) => (),
-            }
-
-            slint::platform::update_timers_and_animations();
-
-            if let Some(window) = self.window.borrow().clone() {
-                window.draw_if_needed(|renderer| {
-                    debug!("start rendering...");
-                    renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
-                    debug!("... done rendering");
-                    inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
-
-                    inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
-                    core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
-
-                    let screen_brightness =
-                        SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
-                    debug!("Setting screen brightness to {}", screen_brightness);
-
-                    let write_closure =
-                        |address: u8, data: &[u8]| inner._dsi.write_cmd(0, address, data).unwrap();
-
-                    embedded_dal::drivers::nt35510::set_brightness(
-                        write_closure,
-                        screen_brightness,
-                    );
-                });
-
-                // handle touch event
-                let button = slint::platform::PointerEventButton::Left;
-                let event = match inner
-                    .touch_screen
-                    .get_touch_event()
-                    .map(|x| x.p1)
-                    .ok()
-                    .flatten()
-                {
-                    Some(state) => {
-                        let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                            .to_logical(window.scale_factor());
-
-                        //info!("Got Touch: {:#?}", state);
-                        Some(match last_touch.replace(position) {
-                            Some(_) => slint::platform::WindowEvent::PointerMoved { position },
-                            None => {
-                                slint::platform::WindowEvent::PointerPressed { position, button }
-                            }
-                        })
-                    }
-                    None => last_touch.take().map(|position| {
-                        slint::platform::WindowEvent::PointerReleased { position, button }
-                    }),
-                };
-
-                if let Some(event) = event {
-                    let is_pointer_release_event =
-                        matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
-
-                    window.dispatch_event(event);
-
-                    // removes hover state on widgets^
-                    if is_pointer_release_event {
-                        window.dispatch_event(slint::platform::WindowEvent::PointerExited);
-                    }
-                }
-            }
-        }
     }
 
     fn duration_since_start(&self) -> core::time::Duration {
@@ -410,40 +327,12 @@ impl slint::platform::Platform for StmBackend<'_> {
 }
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     /*
         SystemClock_Config()
     */
 
-    let mut config = embassy_stm32::Config::default();
-    config.rcc.sys = Sysclk::PLL1_P;
-    config.rcc.ahb_pre = AHBPrescaler::DIV1;
-    config.rcc.apb1_pre = APBPrescaler::DIV4;
-    config.rcc.apb2_pre = APBPrescaler::DIV2;
-
-    // HSE is on and ready
-    config.rcc.hse = Some(Hse {
-        freq: mhz(8),
-        mode: HseMode::Oscillator,
-    });
-    config.rcc.pll_src = PllSource::HSE;
-
-    config.rcc.pll = Some(Pll {
-        prediv: PllPreDiv::DIV8, // PLLM
-        mul: PllMul::MUL360,     // PLLN
-        divp: Some(PllPDiv::DIV2),
-        divq: Some(PllQDiv::DIV7), // was DIV4, but STM BSP example uses 7
-        divr: Some(PllRDiv::DIV6),
-    });
-
-    // This seems to be working, the values in the RCC.PLLSAICFGR are correct according to the debugger. Also on and ready according to CR
-    config.rcc.pllsai = Some(Pll {
-        prediv: PllPreDiv::DIV8,   // Actually ignored
-        mul: PllMul::MUL384,       // PLLN
-        divp: None,                // PLLP
-        divq: None,                // PLLQ
-        divr: Some(PllRDiv::DIV7), // PLLR (Sai actually has special clockdiv register)
-    });
+    let mut config = get_board_config();
 
     info!("Init Embassy...");
 
@@ -619,7 +508,7 @@ async fn main(_spawner: Spawner) {
         }
     }
 
-    let mut cp = cortex_m::Peripherals::take().unwrap();
+    let mut cp = unwrap!(cortex_m::Peripherals::take());
     cp.SCB.disable_dcache(&mut cp.CPUID);
 
     unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
@@ -643,7 +532,16 @@ async fn main(_spawner: Spawner) {
     config.sda_pullup = true;
     config.scl_pullup = true;
 
-    let i2c = embassy_stm32::i2c::I2c::new_blocking(p.I2C1, p.PB8, p.PB9, Hertz(400_000), config);
+    let i2c = embassy_stm32::i2c::I2c::new(
+        p.I2C1,
+        p.PB8,
+        p.PB9,
+        Irqs,
+        p.DMA1_CH6,
+        p.DMA1_CH0,
+        Hertz(400_000),
+        config,
+    );
 
     let i2c_bus = NoopMutex::new(RefCell::new(i2c));
     let i2c_bus = I2C_BUS.init(i2c_bus);
@@ -652,26 +550,40 @@ async fn main(_spawner: Spawner) {
 
     // ### Init Backend ###
     info!("Init StmBackend");
-    slint::platform::set_platform(Box::new(StmBackend::init(
-        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
+    let sw_window = MinimalSoftwareWindow::new(Default::default());
+
+    let (backend, inner) = StmBackend::init(
+        sw_window.clone(),
+        p.DSIHOST,
+        p.LTDC,
+        i2c_dev1,
+        p.PG6,
+        p.PJ2,
+        p.PJ5,
+        p.PH7,
+        p.EXTI5, //fb1, fb2,
         cp.SCB,
-    )))
-    .expect("backend already initialized");
+    );
+    slint::platform::set_platform(Box::new(backend)).expect("backend already initialized");
 
     let window = MainWindow::new().unwrap();
 
     let window_weak = window.as_weak();
-    slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone())).unwrap();
+    spawner
+        .spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()))
+        .unwrap();
 
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
     });
 
     window.on_force_compensation(move || {
+        error!("on_force_compensation");
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::ForceCalibration(500))
     });
 
     window.on_brightness_increase(move || {
+        error!("on_brightness_increase");
         let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
         if current < 240 {
             SCREEN_BRIGHTNESS.store(current + 10, core::sync::atomic::Ordering::Release);
@@ -679,6 +591,7 @@ async fn main(_spawner: Spawner) {
     });
 
     window.on_brightness_decrease(move || {
+        error!("on_brightness_decrease");
         let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
         if current > 20 {
             SCREEN_BRIGHTNESS.store(current - 10, core::sync::atomic::Ordering::Release);
@@ -700,56 +613,68 @@ async fn main(_spawner: Spawner) {
         slint::TimerMode::Repeated,
         core::time::Duration::from_secs(1),
         move || {
-            let window = window_weak.clone().upgrade().unwrap();
+            let window = unwrap!(window_weak.clone().upgrade());
             let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
             let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
             window.set_time_since_last(time_since_last);
         },
     );
 
+    slint_event_loop(sw_window, inner).await
+
+    //window.run().unwrap();
+}
+
+#[embassy_executor::task]
+async fn window_run(window: MainWindow) {
     window.run().unwrap();
 }
 
-async fn measure_co2(i2c: impl embedded_hal::i2c::I2c + 'static, window_weak: Weak<MainWindow>) {
+#[embassy_executor::task]
+async fn measure_co2(
+    i2c: I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>,
+    window_weak: Weak<MainWindow>,
+) {
     //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
     let mut pas_co2 = PasCo2::new(i2c);
 
-    info!("Status: {}", pas_co2.get_status().unwrap());
+    info!("Status: {}", unwrap!(pas_co2.get_status()));
 
     let mut mode = MeasurementMode::default();
     mode.operating_mode = OperatingMode::Idle;
-    pas_co2.set_measurement_mode(mode).unwrap();
+    unwrap!(pas_co2.set_measurement_mode(mode));
 
     let pressure: u16 = 950; //hPa
 
-    pas_co2.set_pressure_compensation(pressure).unwrap();
+    unwrap!(pas_co2.set_pressure_compensation(pressure));
 
-    embassy_time::Delay {}.delay_ms(1000);
+    embassy_time::Delay {}.delay_ms(1000).await;
 
     loop {
         info!("Entering measure_co2 loop");
         match START_MEASUREMENT_SIGNAL.wait().await {
             Co2SensorCommand::ForceCalibration(val) => {
+                warn!("Yielding!");
+                embassy_futures::yield_now().await;
                 warn!("Performing forced compensation!");
-                pas_co2
-                    .do_forced_compensation(val, embassy_time::Delay)
-                    .unwrap();
+                //pas_co2                    .do_forced_compensation(val, embassy_time::Delay)                    .unwrap();
             }
             Co2SensorCommand::StartMeasurement => {
+                info!("Starting Measurement");
                 // Check if the last measurement has been more than 10 seconds ago to prevent measuring more often than specified by user touch.
                 let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
                 let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
                 if time_since_last < 10 && time_last != -1 {
                     warn!("Last measurement less than 10 sec ago. Not measuring this time!");
-                    return;
+                    continue;
                 }
 
-                let window = window_weak.upgrade().unwrap();
+                let window = unwrap!(window_weak.upgrade());
 
-                let status = pas_co2.get_status().unwrap();
+                let status = unwrap!(pas_co2.get_status());
                 info!("Status: {}", status);
 
-                pas_co2.clear_status().unwrap();
+                unwrap!(pas_co2.clear_status());
 
                 let status_text = "Ready: ".to_owned()
                     + if status.ready { "Yes" } else { "No" }
@@ -770,14 +695,14 @@ async fn measure_co2(i2c: impl embedded_hal::i2c::I2c + 'static, window_weak: We
 
                 window.set_status_text(status_text.into());
 
-                pas_co2.start_measurement().unwrap();
+                unwrap!(pas_co2.start_measurement());
                 TIME_LAST.store(
                     embassy_time::Instant::now().as_secs() as i32,
                     core::sync::atomic::Ordering::Relaxed,
                 );
-                embassy_time::Delay.delay_ms(1150);
+                embassy_time::Delay.delay_ms(1150).await;
 
-                let co2_ppm = pas_co2.get_co2_ppm().unwrap();
+                let co2_ppm = unwrap!(pas_co2.get_co2_ppm());
 
                 info!("CO2 PPM: {}", co2_ppm);
                 window.set_co2_ppm(co2_ppm.into());
@@ -793,10 +718,141 @@ async fn measure_co2(i2c: impl embedded_hal::i2c::I2c + 'static, window_weak: We
     }
 }
 
+//#[embassy_executor::task]
+async fn slint_event_loop(
+    mut sw_window: Rc<MinimalSoftwareWindow>,
+    mut inner: StmBackendInner<'static>,
+) {
+    info!("Entering slint_event_loop");
+    //let inner = &mut *self.inner.borrow_mut();
+
+    // TODO!!!
+
+    // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
+    let (fb1, fb2) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(FB1),
+            &mut *core::ptr::addr_of_mut!(FB2),
+        )
+    };
+
+    let mut displayed_fb: &mut [TargetPixel] = fb1;
+    let mut work_fb: &mut [TargetPixel] = fb2;
+
+    let mut last_touch = None;
+    sw_window
+        .borrow_mut()
+        .as_ref()
+        .set_size(slint::PhysicalSize::new(
+            LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
+            LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
+        ));
+
+    info!("Entering slint_event_loop mainloop");
+    loop {
+        slint::platform::update_timers_and_animations();
+
+        match EVENT_LOOP_QUEUE.try_receive() {
+            Ok(Event::Quit) => return,
+            Ok(Event::Event(e)) => e(),
+            Err(_) => (),
+        }
+
+        let window = sw_window.borrow_mut();
+
+        window.draw_if_needed(|renderer| {
+            info!("start rendering...");
+            renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
+            debug!("... done rendering");
+            inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
+
+            inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
+            core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
+
+            let screen_brightness = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
+            debug!("Setting screen brightness to {}", screen_brightness);
+
+            let write_closure =
+                |address: u8, data: &[u8]| unwrap!(inner.dsi.write_cmd(0, address, data));
+
+            embedded_dal::drivers::nt35510::set_brightness(write_closure, screen_brightness);
+        });
+
+        // handle touch event
+        let button = slint::platform::PointerEventButton::Left;
+        let event = match inner
+            .touch_screen
+            .get_touch_event()
+            .map(|x| x.p1)
+            .ok()
+            .flatten()
+        {
+            Some(state) => {
+                let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
+                    .to_logical(window.scale_factor());
+
+                //info!("Got Touch: {:#?}", state);
+                Some(match last_touch.replace(position) {
+                    Some(_) => slint::platform::WindowEvent::PointerMoved { position },
+                    None => slint::platform::WindowEvent::PointerPressed { position, button },
+                })
+            }
+            None => last_touch
+                .take()
+                .map(|position| slint::platform::WindowEvent::PointerReleased { position, button }),
+        };
+
+        if let Some(event) = event {
+            let is_pointer_release_event =
+                matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
+
+            window.dispatch_event(event);
+
+            // removes hover state on widgets^
+            if is_pointer_release_event {
+                window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+            }
+        }
+    }
+}
+
 slint::include_modules!();
 
 #[cortex_m_rt::exception]
 unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
     cortex_m::asm::delay(500_000_000);
     cortex_m::peripheral::SCB::sys_reset();
+}
+
+fn get_board_config() -> embassy_stm32::Config {
+    let mut config = embassy_stm32::Config::default();
+    config.rcc.sys = Sysclk::PLL1_P;
+    config.rcc.ahb_pre = AHBPrescaler::DIV1;
+    config.rcc.apb1_pre = APBPrescaler::DIV4;
+    config.rcc.apb2_pre = APBPrescaler::DIV2;
+
+    // HSE is on and ready
+    config.rcc.hse = Some(Hse {
+        freq: mhz(8),
+        mode: HseMode::Oscillator,
+    });
+    config.rcc.pll_src = PllSource::HSE;
+
+    config.rcc.pll = Some(Pll {
+        prediv: PllPreDiv::DIV8, // PLLM
+        mul: PllMul::MUL360,     // PLLN
+        divp: Some(PllPDiv::DIV2),
+        divq: Some(PllQDiv::DIV7), // was DIV4, but STM BSP example uses 7
+        divr: Some(PllRDiv::DIV6),
+    });
+
+    // This seems to be working, the values in the RCC.PLLSAICFGR are correct according to the debugger. Also on and ready according to CR
+    config.rcc.pllsai = Some(Pll {
+        prediv: PllPreDiv::DIV8,   // Actually ignored
+        mul: PllMul::MUL384,       // PLLN
+        divp: None,                // PLLP
+        divq: None,                // PLLQ
+        divr: Some(PllRDiv::DIV7), // PLLR (Sai actually has special clockdiv register)
+    });
+    config
 }

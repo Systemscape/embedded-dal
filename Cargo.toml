@@ -42,7 +42,7 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2
     "integrated-timers",
 ] }
 
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = ["defmt"] }
 
 
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [

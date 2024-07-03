@@ -1,4 +1,4 @@
-import { Button, HorizontalBox, Switch } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "CO2 Monitor";
@@ -64,6 +64,8 @@ export component MainWindow inherits Window {
     }
 
     TouchArea {
+        x: 0px;
+        width: 50%;
         clicked => {
             debug("start_measurement()");
             root.start_measurement();
