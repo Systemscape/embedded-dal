@@ -4,7 +4,6 @@
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
 use core::{
-    borrow::BorrowMut,
     cell::RefCell,
     sync::atomic::{AtomicI32, AtomicU8},
 };
@@ -55,8 +54,8 @@ use pas_co2_rs::{
     PasCo2,
 };
 use slint::{
-    platform::{software_renderer::MinimalSoftwareWindow, EventLoopProxy},
-    ComponentHandle, EventLoopError, Weak,
+    platform::{software_renderer::MinimalSoftwareWindow},
+    ComponentHandle, Weak,
 };
 use static_cell::StaticCell;
 
@@ -533,6 +532,7 @@ async fn main(spawner: Spawner) {
         .unwrap();
     //slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()));
 
+    /*
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
     });
@@ -567,12 +567,15 @@ async fn main(spawner: Spawner) {
         move || window_weak.clone().unwrap().invoke_start_measurement(),
     );
 
+    */
+
     let window_weak = window.as_weak();
     let time_since_last = slint::Timer::default();
     time_since_last.start(
         slint::TimerMode::Repeated,
         core::time::Duration::from_secs(1),
         move || {
+            error!("second update timer");
             let window = unwrap!(window_weak.clone().upgrade());
             let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
             let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
@@ -580,7 +583,11 @@ async fn main(spawner: Spawner) {
         },
     );
 
-    slint_event_loop(sw_window, inner);
+    window.show().unwrap();
+    sw_window.show().unwrap();
+    slint_event_loop(sw_window, inner).await;
+
+    window.hide().unwrap();
 
     //window.run().unwrap();
 }
@@ -675,7 +682,7 @@ async fn measure_co2(
 
 //#[embassy_executor::task]
 //async fn slint_event_loop(
-fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) {
+async fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) {
     info!("Entering slint_event_loop");
     //let inner = &mut *self.inner.borrow_mut();
 
@@ -704,6 +711,8 @@ fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBack
         info!("Entering slint_event_loop mainloop");
         slint::platform::update_timers_and_animations();
 
+        error!("work_fb: {}", work_fb[0..10]);
+
         sw_window.draw_if_needed(|renderer| {
             info!("start rendering...");
             renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
@@ -711,6 +720,7 @@ fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBack
             inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
             inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
+
             core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
 
             let screen_brightness = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
@@ -762,7 +772,8 @@ fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBack
         // Try to put the MCU to sleep
         if !sw_window.has_active_animations() {
             if let Some(duration) = slint::platform::duration_until_next_timer_update() {
-                //embassy_time::Timer::after(duration.try_into().unwrap()).await;
+                info!("waiting for: {}", duration);
+                embassy_time::Timer::after(duration.try_into().unwrap()).await;
             }
             //inner.exti.wait_for_falling_edge().await
         }
