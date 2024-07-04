@@ -90,7 +90,7 @@ pas-co2-rs = { path = "../pas-co2-rs", features = ["defmt"] }
 
 
 [build-dependencies]
-slint-build = "1.6"
+slint-build = { version = "1.6" }
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -3,10 +3,7 @@
 
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
-use core::{
-    cell::RefCell,
-    sync::atomic::{AtomicI32, AtomicU8},
-};
+use core::{cell::RefCell, sync::atomic::AtomicI32};
 use cortex_m::peripheral::SCB;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
@@ -78,8 +75,10 @@ static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 static ALLOCATOR: Heap = Heap::empty();
 
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
-static SCREEN_BRIGHTNESS: AtomicU8 = AtomicU8::new(100);
+static SCREEN_BRIGHTNESS_SIGNAL: Signal<CriticalSectionRawMutex, ScreenBrightnessCommand> =
+    Signal::new();
 static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
+static TOUCH_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Async>>>> = StaticCell::new();
 
 #[link_section = ".frame_buffer"]
@@ -101,6 +100,11 @@ static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
 enum Co2SensorCommand {
     StartMeasurement,
     ForceCalibration(i16),
+}
+
+enum ScreenBrightnessCommand {
+    Increase,
+    Decrease,
 }
 
 bind_interrupts!(struct Irqs {
@@ -278,9 +282,14 @@ impl slint::platform::Platform for StmBackend {
     fn create_window_adapter(
         &self,
     ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-        //let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::SwappedBuffers);
-        //self.window.replace(Some(window.clone()));
-        //Ok(window)
+        /*
+        // Doesn't work for some reason
+        let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
+            slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
+        );
+        self.window.replace(Some(window.clone()));
+        Ok(window)
+        */
         Ok(self.window.borrow_mut().clone().unwrap().clone())
     }
 
@@ -458,7 +467,7 @@ async fn main(spawner: Spawner) {
 
         let mut asset_flash_addr = core::ptr::addr_of!(__si_slint_assets) as usize - 0x9000_0000;
 
-        defmt::assert!(asset_mem_slice.len() > 0);
+        //defmt::assert!(asset_mem_slice.len() > 0);
 
         for chunk in asset_mem_slice.chunks_mut(32) {
             let transaction = TransferConfig {
@@ -555,18 +564,12 @@ async fn main(spawner: Spawner) {
 
     window.on_brightness_increase(move || {
         error!("on_brightness_increase");
-        let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
-        if current < 240 {
-            SCREEN_BRIGHTNESS.store(current + 10, core::sync::atomic::Ordering::Release);
-        }
+        SCREEN_BRIGHTNESS_SIGNAL.signal(ScreenBrightnessCommand::Increase);
     });
 
     window.on_brightness_decrease(move || {
         error!("on_brightness_decrease");
-        let current = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
-        if current > 20 {
-            SCREEN_BRIGHTNESS.store(current - 10, core::sync::atomic::Ordering::Release);
-        }
+        SCREEN_BRIGHTNESS_SIGNAL.signal(ScreenBrightnessCommand::Decrease);
     });
 
     let window_weak = window.as_weak();
@@ -582,9 +585,8 @@ async fn main(spawner: Spawner) {
     let time_since_last = slint::Timer::default();
     time_since_last.start(
         slint::TimerMode::Repeated,
-        core::time::Duration::from_secs(1),
+        core::time::Duration::from_secs(5),
         move || {
-            error!("second update timer");
             let window = unwrap!(window_weak.clone().upgrade());
             let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
             let time_since_last = embassy_time::Instant::now().as_secs() as i32 - time_last;
@@ -598,6 +600,141 @@ async fn main(spawner: Spawner) {
     window.hide().unwrap();
 
     //window.run().unwrap();
+}
+
+#[embassy_executor::task]
+async fn manage_dsi(mut dsi: Dsi<'static>) {
+    let mut screen_brightness = 100;
+
+    let mut write_closure = |address: u8, data: &[u8]| unwrap!(dsi.write_cmd(0, address, data));
+
+    loop {
+        match SCREEN_BRIGHTNESS_SIGNAL.wait().await {
+            ScreenBrightnessCommand::Increase => screen_brightness += 10,
+            ScreenBrightnessCommand::Decrease => screen_brightness -= 10,
+        }
+
+        screen_brightness = screen_brightness.clamp(10, 250);
+
+        info!("Setting screen brightness to {}", screen_brightness);
+
+        embedded_dal::drivers::nt35510::set_brightness(&mut write_closure, screen_brightness);
+    }
+}
+
+//#[embassy_executor::task]
+//async fn slint_event_loop(
+async fn slint_event_loop(
+    sw_window: Rc<MinimalSoftwareWindow>,
+    mut inner: StmBackendInner<'static>,
+) -> ! {
+    embassy_executor::Spawner::for_current_executor()
+        .await
+        .spawn(manage_dsi(inner.dsi))
+        .unwrap();
+
+    embassy_executor::Spawner::for_current_executor()
+        .await
+        .spawn(read_touch_screen(
+            inner.touch_screen,
+            inner.exti,
+            sw_window.clone(),
+        ))
+        .unwrap();
+
+    info!("Entering slint_event_loop");
+
+    let fb1 = inner.fb1;
+    let fb2 = inner.fb2;
+
+    let mut displayed_fb: &mut [TargetPixel] = fb1;
+    let mut work_fb: &mut [TargetPixel] = fb2;
+
+    sw_window.set_size(slint::PhysicalSize::new(
+        LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
+        LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
+    ));
+
+    loop {
+        slint::platform::update_timers_and_animations();
+
+        sw_window.draw_if_needed(|renderer| {
+            info!("start rendering...");
+            renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
+
+            inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
+
+            inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
+
+            core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
+        });
+
+        // Try to put the MCU to sleep
+        if !sw_window.has_active_animations() {
+            if let Some(duration) = slint::platform::duration_until_next_timer_update() {
+                info!("waiting for: {}", duration);
+                select(
+                    embassy_time::Timer::after(duration.try_into().unwrap()),
+                    TOUCH_SIGNAL.wait(),
+                )
+                .await;
+                continue;
+            } else {
+                TOUCH_SIGNAL.wait().await;
+            }
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn read_touch_screen(
+    mut touch_screen: Ft6x36<I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>>,
+    mut exti: ExtiInput<'static>,
+    sw_window: Rc<MinimalSoftwareWindow>,
+) {
+    let mut last_touch = None;
+    loop {
+        // handle touch event
+        let button = slint::platform::PointerEventButton::Left;
+        let event = match touch_screen.get_touch_event().map(|x| x.p1).ok().flatten() {
+            Some(state) => {
+                let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
+                    .to_logical(sw_window.scale_factor());
+
+                //info!("Got Touch: {:#?}", state);
+                Some(match last_touch.replace(position) {
+                    Some(_) => slint::platform::WindowEvent::PointerMoved { position },
+                    None => slint::platform::WindowEvent::PointerPressed { position, button },
+                })
+            }
+            None => last_touch
+                .take()
+                .map(|position| slint::platform::WindowEvent::PointerReleased { position, button }),
+        };
+
+        if let Some(event) = event {
+            let is_pointer_release_event =
+                matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
+
+            sw_window.dispatch_event(event);
+
+            // removes hover state on widgets^
+            if is_pointer_release_event {
+                sw_window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+            }
+        }
+
+        TOUCH_SIGNAL.signal(());
+        exti.wait_for_any_edge().await;
+    }
+}
+
+slint::include_modules!();
+
+#[cortex_m_rt::exception]
+unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    cortex_m::asm::delay(500_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
 }
 
 #[embassy_executor::task]
@@ -686,111 +823,6 @@ async fn measure_co2(
             }
         }
     }
-}
-
-//#[embassy_executor::task]
-//async fn slint_event_loop(
-async fn slint_event_loop(
-    sw_window: Rc<MinimalSoftwareWindow>,
-    mut inner: StmBackendInner<'static>,
-) -> ! {
-    info!("Entering slint_event_loop");
-
-    let fb1 = inner.fb1;
-    let fb2 = inner.fb2;
-
-    let mut displayed_fb: &mut [TargetPixel] = fb1;
-    let mut work_fb: &mut [TargetPixel] = fb2;
-
-    let mut last_touch = None;
-    sw_window.set_size(slint::PhysicalSize::new(
-        LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
-        LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
-    ));
-
-    sw_window.request_redraw();
-
-    loop {
-        slint::platform::update_timers_and_animations();
-
-        sw_window.draw_if_needed(|renderer| {
-            info!("start rendering...");
-            renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
-            info!("... done rendering");
-            inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
-
-            inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
-
-            core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
-
-            let screen_brightness = SCREEN_BRIGHTNESS.load(core::sync::atomic::Ordering::Acquire);
-            info!("Setting screen brightness to {}", screen_brightness);
-
-            let write_closure =
-                |address: u8, data: &[u8]| unwrap!(inner.dsi.write_cmd(0, address, data));
-
-            embedded_dal::drivers::nt35510::set_brightness(write_closure, screen_brightness);
-        });
-
-        // handle touch event
-        let button = slint::platform::PointerEventButton::Left;
-        let event = match inner
-            .touch_screen
-            .get_touch_event()
-            .map(|x| x.p1)
-            .ok()
-            .flatten()
-        {
-            Some(state) => {
-                let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                    .to_logical(sw_window.scale_factor());
-
-                //info!("Got Touch: {:#?}", state);
-                Some(match last_touch.replace(position) {
-                    Some(_) => slint::platform::WindowEvent::PointerMoved { position },
-                    None => slint::platform::WindowEvent::PointerPressed { position, button },
-                })
-            }
-            None => last_touch
-                .take()
-                .map(|position| slint::platform::WindowEvent::PointerReleased { position, button }),
-        };
-
-        if let Some(event) = event {
-            let is_pointer_release_event =
-                matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
-
-            sw_window.dispatch_event(event);
-
-            // removes hover state on widgets^
-            if is_pointer_release_event {
-                sw_window.dispatch_event(slint::platform::WindowEvent::PointerExited);
-            }
-            continue;
-        }
-
-        // Try to put the MCU to sleep
-        if !sw_window.has_active_animations() {
-            if let Some(duration) = slint::platform::duration_until_next_timer_update() {
-                info!("waiting for: {}", duration);
-                select(
-                    embassy_time::Timer::after(duration.try_into().unwrap()),
-                    inner.exti.wait_for_any_edge(),
-                )
-                .await;
-                continue;
-            }
-            inner.exti.wait_for_any_edge().await;
-        }
-    }
-}
-
-slint::include_modules!();
-
-#[cortex_m_rt::exception]
-unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    cortex_m::asm::delay(500_000_000);
-    cortex_m::peripheral::SCB::sys_reset();
 }
 
 fn get_board_config() -> embassy_stm32::Config {
