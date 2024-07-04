@@ -3,6 +3,7 @@
 
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
+use embassy_futures::select::{select, Select};
 use core::{
     cell::RefCell,
     sync::atomic::{AtomicI32, AtomicU8},
@@ -272,11 +273,10 @@ impl slint::platform::Platform for StmBackend {
     fn create_window_adapter(
         &self,
     ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-        let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
-            slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
-        );
-        self.window.replace(Some(window.clone()));
-        Ok(window)
+        //let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(slint::platform::software_renderer::RepaintBufferType::SwappedBuffers);
+        //self.window.replace(Some(window.clone()));
+        //Ok(window)
+        Ok(self.window.borrow_mut().clone().unwrap().clone())
     }
 
     fn duration_since_start(&self) -> core::time::Duration {
@@ -532,7 +532,7 @@ async fn main(spawner: Spawner) {
         .unwrap();
     //slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()));
 
-    /*
+
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
     });
@@ -567,7 +567,6 @@ async fn main(spawner: Spawner) {
         move || window_weak.clone().unwrap().invoke_start_measurement(),
     );
 
-    */
 
     let window_weak = window.as_weak();
     let time_since_last = slint::Timer::default();
@@ -584,7 +583,6 @@ async fn main(spawner: Spawner) {
     );
 
     window.show().unwrap();
-    sw_window.show().unwrap();
     slint_event_loop(sw_window, inner).await;
 
     window.hide().unwrap();
@@ -682,7 +680,7 @@ async fn measure_co2(
 
 //#[embassy_executor::task]
 //async fn slint_event_loop(
-async fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) {
+async fn slint_event_loop(sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) -> ! {
     info!("Entering slint_event_loop");
     //let inner = &mut *self.inner.borrow_mut();
 
@@ -708,10 +706,7 @@ async fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: S
     sw_window.request_redraw();
 
     loop {
-        info!("Entering slint_event_loop mainloop");
         slint::platform::update_timers_and_animations();
-
-        error!("work_fb: {}", work_fb[0..10]);
 
         sw_window.draw_if_needed(|renderer| {
             info!("start rendering...");
@@ -773,9 +768,11 @@ async fn slint_event_loop(mut sw_window: Rc<MinimalSoftwareWindow>, mut inner: S
         if !sw_window.has_active_animations() {
             if let Some(duration) = slint::platform::duration_until_next_timer_update() {
                 info!("waiting for: {}", duration);
-                embassy_time::Timer::after(duration.try_into().unwrap()).await;
+                select(embassy_time::Timer::after(duration.try_into().unwrap()), inner.exti.wait_for_any_edge()).await;
+                continue;
             }
-            //inner.exti.wait_for_falling_edge().await
+            inner.exti.wait_for_any_edge().await;
+            
         }
     }
 }
