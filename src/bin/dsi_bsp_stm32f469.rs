@@ -3,7 +3,6 @@
 
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
-use embassy_futures::select::{select, Select};
 use core::{
     cell::RefCell,
     sync::atomic::{AtomicI32, AtomicU8},
@@ -12,6 +11,7 @@ use cortex_m::peripheral::SCB;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
 use embassy_executor::Spawner;
+use embassy_futures::select::select;
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
@@ -48,16 +48,14 @@ use embedded_dal::{
         ft6x36::Ft6x36,
         ltdc::{self, Ltdc},
     },
+    pixels::ARGB8888,
 };
 use embedded_hal_async::delay::DelayNs;
 use pas_co2_rs::{
     regs::{MeasurementMode, OperatingMode},
     PasCo2,
 };
-use slint::{
-    platform::{software_renderer::MinimalSoftwareWindow},
-    ComponentHandle, Weak,
-};
+use slint::{platform::software_renderer::MinimalSoftwareWindow, ComponentHandle, Weak};
 use static_cell::StaticCell;
 
 use defmt_rtt as _;
@@ -122,9 +120,12 @@ struct StmBackendInner<'a> {
     dsi: Dsi<'a>,
     touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>>,
     exti: ExtiInput<'a>,
+    fb1: &'a mut [ARGB8888; NUM_PIXELS],
+    fb2: &'a mut [ARGB8888; NUM_PIXELS],
 }
 
 impl<'a> StmBackendInner<'a> {
+    #[allow(clippy::too_many_arguments)]
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
@@ -134,6 +135,8 @@ impl<'a> StmBackendInner<'a> {
         pj5: PJ5,
         ph7: PH7,
         exti5: EXTI5,
+        fb1: &'a mut [ARGB8888; NUM_PIXELS],
+        fb2: &'a mut [ARGB8888; NUM_PIXELS],
         scb: SCB,
     ) -> StmBackendInner<'a> {
         /*
@@ -265,6 +268,8 @@ impl<'a> StmBackendInner<'a> {
             dsi,
             touch_screen,
             exti: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
+            fb1,
+            fb2,
         }
     }
 }
@@ -511,9 +516,16 @@ async fn main(spawner: Spawner) {
 
     let i2c_dev1 = I2cDevice::new(i2c_bus);
 
+    // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
+    let (fb1, fb2) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(FB1),
+            &mut *core::ptr::addr_of_mut!(FB2),
+        )
+    };
+
     let inner = StmBackendInner::init(
-        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, //fb1, fb2,
-        cp.SCB,
+        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, fb1, fb2, cp.SCB,
     );
 
     // ### Init Backend ###
@@ -531,7 +543,6 @@ async fn main(spawner: Spawner) {
         .spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()))
         .unwrap();
     //slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()));
-
 
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
@@ -566,7 +577,6 @@ async fn main(spawner: Spawner) {
         core::time::Duration::from_secs(60),
         move || window_weak.clone().unwrap().invoke_start_measurement(),
     );
-
 
     let window_weak = window.as_weak();
     let time_since_last = slint::Timer::default();
@@ -680,19 +690,14 @@ async fn measure_co2(
 
 //#[embassy_executor::task]
 //async fn slint_event_loop(
-async fn slint_event_loop(sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBackendInner<'static>) -> ! {
+async fn slint_event_loop(
+    sw_window: Rc<MinimalSoftwareWindow>,
+    mut inner: StmBackendInner<'static>,
+) -> ! {
     info!("Entering slint_event_loop");
-    //let inner = &mut *self.inner.borrow_mut();
 
-    // TODO!!!
-
-    // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
-    let (fb1, fb2) = unsafe {
-        (
-            &mut *core::ptr::addr_of_mut!(FB1),
-            &mut *core::ptr::addr_of_mut!(FB2),
-        )
-    };
+    let fb1 = inner.fb1;
+    let fb2 = inner.fb2;
 
     let mut displayed_fb: &mut [TargetPixel] = fb1;
     let mut work_fb: &mut [TargetPixel] = fb2;
@@ -755,7 +760,7 @@ async fn slint_event_loop(sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBa
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
 
-                sw_window.dispatch_event(event);
+            sw_window.dispatch_event(event);
 
             // removes hover state on widgets^
             if is_pointer_release_event {
@@ -768,11 +773,14 @@ async fn slint_event_loop(sw_window: Rc<MinimalSoftwareWindow>, mut inner: StmBa
         if !sw_window.has_active_animations() {
             if let Some(duration) = slint::platform::duration_until_next_timer_update() {
                 info!("waiting for: {}", duration);
-                select(embassy_time::Timer::after(duration.try_into().unwrap()), inner.exti.wait_for_any_edge()).await;
+                select(
+                    embassy_time::Timer::after(duration.try_into().unwrap()),
+                    inner.exti.wait_for_any_edge(),
+                )
+                .await;
                 continue;
             }
             inner.exti.wait_for_any_edge().await;
-            
         }
     }
 }
