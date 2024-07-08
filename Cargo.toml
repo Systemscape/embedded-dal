@@ -31,6 +31,7 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a387
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
+    "generic-queue",
 ] }
 
 embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
@@ -39,10 +40,13 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2
     "executor-thread",
     "executor-interrupt",
     "defmt",
-    "integrated-timers",
+    #"integrated-timers",
+
 ] }
 
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = ["defmt"] }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+    "defmt",
+] }
 
 
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [

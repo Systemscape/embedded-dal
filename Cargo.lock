@@ -676,8 +676,6 @@ dependencies = [
  "defmt",
  "document-features",
  "embassy-executor-macros",
- "embassy-time-driver",
- "embassy-time-queue-driver",
 ]
 
 [[package]]
@@ -1816,6 +1814,7 @@ version = "0.1.0-beta.1"
 dependencies = [
  "defmt",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "num_enum",
 ]
 

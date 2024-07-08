@@ -6,8 +6,8 @@ use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
 use core::{cell::RefCell, sync::atomic::AtomicI32};
 use cortex_m::peripheral::SCB;
 use defmt::*;
-use embassy_embedded_hal::shared_bus::blocking::i2c::I2cDevice;
-use embassy_executor::Spawner;
+use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_executor::{Executor, InterruptExecutor};
 use embassy_futures::select::select;
 use embassy_stm32::{
     bind_interrupts,
@@ -15,6 +15,8 @@ use embassy_stm32::{
     gpio::{Level, Output, Pull, Speed},
     i2c,
     i2c::I2c,
+    interrupt,
+    interrupt::{InterruptExt, Priority},
     mode::Async,
     peripherals,
     peripherals::{DSIHOST, EXTI5, LTDC, PG6, PH7, PJ2, PJ5},
@@ -30,13 +32,7 @@ use embassy_stm32::{
     },
     time::{mhz, Hertz},
 };
-use embassy_sync::{
-    blocking_mutex::{
-        raw::{CriticalSectionRawMutex, NoopRawMutex},
-        NoopMutex,
-    },
-    signal::Signal,
-};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Duration;
 use embedded_dal::{
     config::{Dimensions, Orientation},
@@ -78,8 +74,9 @@ static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 static SCREEN_BRIGHTNESS_SIGNAL: Signal<CriticalSectionRawMutex, ScreenBrightnessCommand> =
     Signal::new();
 static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
-static TOUCH_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-static I2C_BUS: StaticCell<NoopMutex<RefCell<I2c<'static, Async>>>> = StaticCell::new();
+static TRIGGER_RENDERER: Signal<CriticalSectionRawMutex, Option<slint::platform::WindowEvent>> =
+    Signal::new();
+static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, I2c<'static, Async>>> = StaticCell::new();
 
 #[link_section = ".frame_buffer"]
 static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
@@ -107,6 +104,20 @@ enum ScreenBrightnessCommand {
     Decrease,
 }
 
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_MED: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+
+#[interrupt]
+unsafe fn UART4() {
+    EXECUTOR_HIGH.on_interrupt()
+}
+
+#[interrupt]
+unsafe fn UART5() {
+    EXECUTOR_MED.on_interrupt()
+}
+
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
@@ -122,7 +133,7 @@ struct StmBackendInner<'a> {
     _reset: Output<'a>,
     ltdc: Ltdc<'a>,
     dsi: Dsi<'a>,
-    touch_screen: Ft6x36<I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>>,
+    touch_screen: Ft6x36<I2cDevice<'a, CriticalSectionRawMutex, I2c<'static, Async>>>,
     exti: ExtiInput<'a>,
     fb1: &'a mut [ARGB8888; NUM_PIXELS],
     fb2: &'a mut [ARGB8888; NUM_PIXELS],
@@ -133,7 +144,7 @@ impl<'a> StmBackendInner<'a> {
     fn init(
         dsihost: DSIHOST,
         ltdc: LTDC,
-        i2c: I2cDevice<'a, NoopRawMutex, I2c<'static, Async>>,
+        i2c: I2cDevice<'a, CriticalSectionRawMutex, I2c<'static, Async>>,
         _pg6: PG6,
         pj2: PJ2,
         pj5: PJ5,
@@ -172,7 +183,7 @@ impl<'a> StmBackendInner<'a> {
         );
 
         debug!("Init touch_screen");
-        unwrap!(touch_screen.init());
+        unwrap!(embassy_futures::block_on(touch_screen.init()));
         touch_screen.set_orientation(match LCD_ORIENTATION {
             Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
             Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
@@ -183,10 +194,8 @@ impl<'a> StmBackendInner<'a> {
             None => warn!("No info"),
         }
 
-        let diag = unwrap!(touch_screen.get_diagnostics());
+        let diag = unwrap!(embassy_futures::block_on(touch_screen.get_diagnostics()));
         info!("Got touch screen diag: {:#?}", diag);
-
-        info!("Get touch event: {:#?}", touch_screen.get_touch_event());
 
         // END TOUCHSCREEN
 
@@ -303,8 +312,8 @@ impl slint::platform::Platform for StmBackend {
     }
 }
 
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
+#[cortex_m_rt::entry]
+fn main() -> ! {
     /*
         SystemClock_Config()
     */
@@ -520,7 +529,7 @@ async fn main(spawner: Spawner) {
         config,
     );
 
-    let i2c_bus = NoopMutex::new(RefCell::new(i2c));
+    let i2c_bus = Mutex::new(i2c);
     let i2c_bus = I2C_BUS.init(i2c_bus);
 
     let i2c_dev1 = I2cDevice::new(i2c_bus);
@@ -538,20 +547,15 @@ async fn main(spawner: Spawner) {
     );
 
     // ### Init Backend ###
-    info!("Init StmBackend");
+    info!("Init StmBackend...");
     let sw_window = MinimalSoftwareWindow::new(Default::default());
     slint::platform::set_platform(Box::new(StmBackend {
         window: RefCell::new(Some(sw_window.clone())),
     }))
     .expect("backend already initialized");
+    info!("StmBackend initialized!");
 
     let window = MainWindow::new().unwrap();
-
-    let window_weak = window.as_weak();
-    spawner
-        .spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()))
-        .unwrap();
-    //slint::spawn_local(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone()));
 
     window.on_start_measurement(|| {
         START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
@@ -594,10 +598,39 @@ async fn main(spawner: Spawner) {
         },
     );
 
-    window.show().unwrap();
-    slint_event_loop(sw_window, inner).await;
+    let touch_screen = inner.touch_screen;
+    let exti = inner.exti;
 
-    window.hide().unwrap();
+    info!("Spawning Touchscreen Task");
+    // High-priority executor: UART4, priority level 6
+    interrupt::UART4.set_priority(Priority::P6);
+    let spawner = EXECUTOR_HIGH.start(interrupt::UART4);
+    unwrap!(spawner.spawn(read_touch_screen(
+        touch_screen,
+        exti,
+        sw_window.scale_factor(),
+    )));
+
+    let window_weak = window.as_weak();
+
+    info!("Spawning CO2 Measurement Task");
+    // Medium-priority executor: UART5, priority level 7
+    interrupt::UART5.set_priority(Priority::P7);
+    let spawner = EXECUTOR_MED.start(interrupt::UART5);
+    unwrap!(spawner.spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone())));
+
+    window.show().unwrap();
+
+    info!("Spawning Remaining Tasks");
+    let executor = EXECUTOR_LOW.init(Executor::new());
+    executor.run(|spawner| {
+        unwrap!(spawner.spawn(manage_dsi(inner.dsi)));
+        unwrap!(spawner.spawn(slint_event_loop(
+            sw_window, inner.scb, inner.ltdc, inner.fb1, inner.fb2
+        )));
+    });
+
+    //window.hide().unwrap();
 
     //window.run().unwrap();
 }
@@ -622,30 +655,16 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
     }
 }
 
-//#[embassy_executor::task]
-//async fn slint_event_loop(
+#[embassy_executor::task]
 async fn slint_event_loop(
+    //async fn slint_event_loop(
     sw_window: Rc<MinimalSoftwareWindow>,
-    mut inner: StmBackendInner<'static>,
+    mut scb: SCB,
+    mut ltdc: Ltdc<'static>,
+    fb1: &'static mut [ARGB8888],
+    fb2: &'static mut [ARGB8888],
 ) -> ! {
-    embassy_executor::Spawner::for_current_executor()
-        .await
-        .spawn(manage_dsi(inner.dsi))
-        .unwrap();
-
-    embassy_executor::Spawner::for_current_executor()
-        .await
-        .spawn(read_touch_screen(
-            inner.touch_screen,
-            inner.exti,
-            sw_window.clone(),
-        ))
-        .unwrap();
-
     info!("Entering slint_event_loop");
-
-    let fb1 = inner.fb1;
-    let fb2 = inner.fb2;
 
     let mut displayed_fb: &mut [TargetPixel] = fb1;
     let mut work_fb: &mut [TargetPixel] = fb2;
@@ -662,9 +681,9 @@ async fn slint_event_loop(
             info!("start rendering...");
             renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
 
-            inner.scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
+            scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
 
-            inner.ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
+            ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
 
             core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
         });
@@ -673,33 +692,48 @@ async fn slint_event_loop(
         if !sw_window.has_active_animations() {
             if let Some(duration) = slint::platform::duration_until_next_timer_update() {
                 info!("waiting for: {}", duration);
-                select(
+                if let embassy_futures::select::Either::Second(Some(event)) = select(
                     embassy_time::Timer::after(duration.try_into().unwrap()),
-                    TOUCH_SIGNAL.wait(),
+                    TRIGGER_RENDERER.wait(),
                 )
-                .await;
-                continue;
-            } else {
-                TOUCH_SIGNAL.wait().await;
+                .await
+                {
+                    sw_window.dispatch_event(event);
+                }
+            } else if let Some(event) = TRIGGER_RENDERER.wait().await {
+                sw_window.dispatch_event(event);
             }
+            TRIGGER_RENDERER.reset();
         }
     }
 }
 
 #[embassy_executor::task]
 async fn read_touch_screen(
-    mut touch_screen: Ft6x36<I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>>,
+    mut touch_screen: Ft6x36<I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>>,
     mut exti: ExtiInput<'static>,
-    sw_window: Rc<MinimalSoftwareWindow>,
+    window_scale_factor: f32,
 ) {
+    debug!("Entering read_touch_screen");
     let mut last_touch = None;
     loop {
+        debug!("read_touch_screen loop begin");
+        // Remember the current exti pin state. In case it changes during read or rendering.
+        let exti_pin_high = exti.is_high();
+
         // handle touch event
         let button = slint::platform::PointerEventButton::Left;
-        let event = match touch_screen.get_touch_event().map(|x| x.p1).ok().flatten() {
+        let event = match touch_screen
+            .get_touch_event()
+            .await
+            .map(|x| x.p1)
+            .ok()
+            .flatten()
+        {
             Some(state) => {
-                let position = slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                    .to_logical(sw_window.scale_factor());
+                let position: slint::LogicalPosition =
+                    slint::PhysicalPosition::new(state.x as i32, state.y as i32)
+                        .to_logical(window_scale_factor);
 
                 //info!("Got Touch: {:#?}", state);
                 Some(match last_touch.replace(position) {
@@ -715,52 +749,50 @@ async fn read_touch_screen(
         if let Some(event) = event {
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
+            TRIGGER_RENDERER.signal(Some(event));
 
-            sw_window.dispatch_event(event);
-
-            // removes hover state on widgets^
+            // removes hover state on widgets
             if is_pointer_release_event {
-                sw_window.dispatch_event(slint::platform::WindowEvent::PointerExited);
+                // Trigger the rendering loop
+                TRIGGER_RENDERER.signal(Some(slint::platform::WindowEvent::PointerExited));
             }
         }
 
-        TOUCH_SIGNAL.signal(());
-        exti.wait_for_any_edge().await;
+        debug!("read_touch_screen loop end. Waiting for exti...");
+
+        if exti_pin_high {
+            exti.wait_for_low().await;
+        } else {
+            exti.wait_for_high().await;
+        }
     }
-}
-
-slint::include_modules!();
-
-#[cortex_m_rt::exception]
-unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
-    cortex_m::asm::delay(500_000_000);
-    cortex_m::peripheral::SCB::sys_reset();
 }
 
 #[embassy_executor::task]
 async fn measure_co2(
-    i2c: I2cDevice<'static, NoopRawMutex, I2c<'static, Async>>,
+    i2c: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
     window_weak: Weak<MainWindow>,
 ) {
+    debug!("measure_co2 begin");
     //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
     let mut pas_co2 = PasCo2::new(i2c);
 
-    info!("Status: {}", unwrap!(pas_co2.get_status()));
+    info!("Status: {}", unwrap!(pas_co2.get_status().await));
 
     let mut mode = MeasurementMode::default();
     mode.operating_mode = OperatingMode::Idle;
-    unwrap!(pas_co2.set_measurement_mode(mode));
+    unwrap!(pas_co2.set_measurement_mode(mode).await);
 
     let pressure: u16 = 950; //hPa
 
-    unwrap!(pas_co2.set_pressure_compensation(pressure));
+    unwrap!(pas_co2.set_pressure_compensation(pressure).await);
 
     embassy_time::Delay {}.delay_ms(1000).await;
 
     loop {
         info!("Entering measure_co2 loop");
         match START_MEASUREMENT_SIGNAL.wait().await {
-            Co2SensorCommand::ForceCalibration(val) => {
+            Co2SensorCommand::ForceCalibration(_val) => {
                 warn!("Yielding!");
                 embassy_futures::yield_now().await;
                 warn!("Performing forced compensation!");
@@ -778,10 +810,10 @@ async fn measure_co2(
 
                 let window = unwrap!(window_weak.upgrade());
 
-                let status = unwrap!(pas_co2.get_status());
+                let status = unwrap!(pas_co2.get_status().await);
                 info!("Status: {}", status);
 
-                unwrap!(pas_co2.clear_status());
+                unwrap!(pas_co2.clear_status().await);
 
                 let status_text = "Ready: ".to_owned()
                     + if status.ready { "Yes" } else { "No" }
@@ -802,14 +834,14 @@ async fn measure_co2(
 
                 window.set_status_text(status_text.into());
 
-                unwrap!(pas_co2.start_measurement());
+                unwrap!(pas_co2.start_measurement().await);
                 TIME_LAST.store(
                     embassy_time::Instant::now().as_secs() as i32,
                     core::sync::atomic::Ordering::Relaxed,
                 );
                 embassy_time::Delay.delay_ms(1150).await;
 
-                let co2_ppm = unwrap!(pas_co2.get_co2_ppm());
+                let co2_ppm = unwrap!(pas_co2.get_co2_ppm().await);
 
                 info!("CO2 PPM: {}", co2_ppm);
                 window.set_co2_ppm(co2_ppm.into());
@@ -820,6 +852,8 @@ async fn measure_co2(
                     _ => slint::Color::from_rgb_u8(255, 0, 0),
                 };
                 window.set_background_color(color);
+
+                TRIGGER_RENDERER.signal(None);
             }
         }
     }
@@ -856,4 +890,12 @@ fn get_board_config() -> embassy_stm32::Config {
         divr: Some(PllRDiv::DIV7), // PLLR (Sai actually has special clockdiv register)
     });
     config
+}
+
+slint::include_modules!();
+
+#[cortex_m_rt::exception]
+unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
+    cortex_m::asm::delay(500_000_000);
+    cortex_m::peripheral::SCB::sys_reset();
 }

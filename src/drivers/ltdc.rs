@@ -46,18 +46,18 @@ impl Ltdc<'_> {
 
         let ltdc_pc_polarity = Pcpol::RISINGEDGE; // LTDC_PCPOLARITY_IPC == 0
 
-        let ltdc_de_polarity: Depol = if dsi_config.de_polarity == false {
+        let ltdc_de_polarity: Depol = if !dsi_config.de_polarity {
             Depol::ACTIVELOW
         } else {
             Depol::ACTIVEHIGH
         };
-        let ltdc_vs_polarity: Vspol = if dsi_config.vs_polarity == false {
+        let ltdc_vs_polarity: Vspol = if !dsi_config.vs_polarity {
             Vspol::ACTIVEHIGH
         } else {
             Vspol::ACTIVELOW
         };
 
-        let ltdc_hs_polarity: Hspol = if dsi_config.hs_polarity == false {
+        let ltdc_hs_polarity: Hspol = if !dsi_config.hs_polarity {
             Hspol::ACTIVEHIGH
         } else {
             Hspol::ACTIVELOW

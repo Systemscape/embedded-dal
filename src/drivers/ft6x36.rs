@@ -1,7 +1,7 @@
 /// FT6x36 driver based on the [ft6x36-rs](https://github.com/pyaillet/ft6x36-rs/tree/main) project.
 ///
 /// Gesture recognition apparently requires some custom firmware for the chip that is usually not present. So this is not implemented attempts from the original
-use embedded_hal::i2c::{ErrorType, I2c, SevenBitAddress};
+use embedded_hal_async::i2c::{ErrorType, I2c, SevenBitAddress};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
 use core::cmp::max;
@@ -431,10 +431,11 @@ where
     /// - initializes the [info structure of the driver](Ft6x36Info)
     /// - sets the control mode to active mode
     ///
-    pub fn init(&mut self) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn init(&mut self) -> Result<(), <I2C as ErrorType>::Error> {
         let mut buf: [u8; 13] = [0; 13];
         self.i2c
-            .write_read(self.address, &[Reg::ChipId.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::ChipId.into()], &mut buf)
+            .await?;
         let chip_id: ChipId = buf[get_offset!(Reg::ChipId, Reg::ChipId)].into();
         let firmware_id: u8 = buf[get_offset!(Reg::ChipId, Reg::FirmwareId)];
         let panel_id: u8 = buf[get_offset!(Reg::ChipId, Reg::PanelId)];
@@ -445,7 +446,7 @@ where
             panel_id,
             release_code,
         });
-        self.set_control_mode(0)?;
+        self.set_control_mode(0).await?;
         Ok(())
     }
 
@@ -455,10 +456,11 @@ where
     }
 
     /// Get the full raw report of touch events
-    pub fn get_touch_event(&mut self) -> Result<RawTouchEvent, <I2C as ErrorType>::Error> {
+    pub async fn get_touch_event(&mut self) -> Result<RawTouchEvent, <I2C as ErrorType>::Error> {
         let mut report: [u8; REPORT_SIZE] = [0; REPORT_SIZE];
         self.i2c
-            .write_read(self.address, &[Reg::DeviceMode.into()], &mut report)?;
+            .write_read(self.address, &[Reg::DeviceMode.into()], &mut report)
+            .await?;
 
         let event: RawTouchEvent = report.into();
         Ok(event.translate_orientation(self.size, self.orientation))
@@ -468,11 +470,12 @@ where
     ///
     /// **Note:** This requires your touch screen firmware to provide this functionality.
     /// This is often not the case.
-    pub fn get_gesture_params(&mut self) -> Result<GestureParams, <I2C as ErrorType>::Error> {
+    pub async fn get_gesture_params(&mut self) -> Result<GestureParams, <I2C as ErrorType>::Error> {
         let mut buf: [u8; 6] = [0; 6];
 
         self.i2c
-            .write_read(self.address, &[Reg::GestRadianValue.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::GestRadianValue.into()], &mut buf)
+            .await?;
         Ok(GestureParams {
             minimum_angle: buf[0],
             offset_left_right: buf[1],
@@ -484,18 +487,23 @@ where
     }
 
     /// Set the threshold for touch detection
-    pub fn set_touch_threshold(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn set_touch_threshold(
+        &mut self,
+        value: u8,
+    ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::TouchDetectionThreshold.into(), value])
+            .await
     }
 
     /// Set the "filter function coefficient"
-    pub fn set_touch_filter_coefficient(
+    pub async fn set_touch_filter_coefficient(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::TouchFilterCoeff.into(), value])
+            .await
     }
 
     /// Set the control mode
@@ -503,81 +511,94 @@ where
     /// - 0: Will keep the Active mode when there is no touching
     /// - 1: Switching from Active mode to Monitor mode automatically when there
     ///   is no touching and the TimeActiveMonitor period is elapsed
-    pub fn set_control_mode(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn set_control_mode(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::ControlMode.into(), value])
+            .await
     }
 
     /// Set the time period of switching from Active mode to Monitor mode when there is no touching.
-    pub fn set_time_enter_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn set_time_enter_monitor(
+        &mut self,
+        value: u8,
+    ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::TimeActiveMonitor.into(), value])
+            .await
     }
 
     /// Set the report rate in Active mode
-    pub fn set_period_active(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn set_period_active(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::PeriodActive.into(), value])
+            .await
     }
 
     /// Set the report rate in Monitor mode
-    pub fn set_period_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
+    pub async fn set_period_monitor(&mut self, value: u8) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::PeriodMonitor.into(), value])
+            .await
     }
 
     /// Set the minimum angle for gesture detection (in rotating gesture mode)
-    pub fn set_gesture_minimum_angle(
+    pub async fn set_gesture_minimum_angle(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestRadianValue.into(), value])
+            .await
     }
 
     /// Set the maximum offset for detecting Moving left and Moving right gestures
-    pub fn set_gesture_offset_left_right(
+    pub async fn set_gesture_offset_left_right(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestOffsetLeftRight.into(), value])
+            .await
     }
 
     /// Set the maximum offset for detecting Moving up and Moving down gestures
-    pub fn set_gesture_offset_up_down(
+    pub async fn set_gesture_offset_up_down(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestOffsetUpDown.into(), value])
+            .await
     }
 
     /// Set the minimum distance for detecting Moving up and Moving down gestures
-    pub fn set_gesture_distance_up_down(
+    pub async fn set_gesture_distance_up_down(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestDistUpDown.into(), value])
+            .await
     }
 
     /// Set the minimum distance for detecting Moving left and Moving right gestures
-    pub fn set_gesture_distance_left_right(
+    pub async fn set_gesture_distance_left_right(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestDistLeftRight.into(), value])
+            .await
     }
 
     /// Set the minimum distance for detecting zoom gestures
-    pub fn set_gesture_distance_zoom(
+    pub async fn set_gesture_distance_zoom(
         &mut self,
         value: u8,
     ) -> Result<(), <I2C as ErrorType>::Error> {
         self.i2c
             .write(self.address, &[Reg::GestDistZoom.into(), value])
+            .await
     }
 
     /// Get device information
@@ -588,26 +609,32 @@ where
     }
 
     /// Get device Diagnostics
-    pub fn get_diagnostics(&mut self) -> Result<Diagnostics, <I2C as ErrorType>::Error> {
+    pub async fn get_diagnostics(&mut self) -> Result<Diagnostics, <I2C as ErrorType>::Error> {
         let mut buf: [u8; 1] = [0];
         self.i2c
-            .write_read(self.address, &[Reg::PowerMode.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::PowerMode.into()], &mut buf)
+            .await?;
         let power_mode = buf[0];
         self.i2c
-            .write_read(self.address, &[Reg::GMode.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::GMode.into()], &mut buf)
+            .await?;
         let g_mode = buf[0];
         self.i2c
-            .write_read(self.address, &[Reg::OperatingMode.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::OperatingMode.into()], &mut buf)
+            .await?;
         let state = buf[0];
         self.i2c
-            .write_read(self.address, &[Reg::LibVersionH.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::LibVersionH.into()], &mut buf)
+            .await?;
         let lib_version_h = buf[0];
         self.i2c
-            .write_read(self.address, &[Reg::LibVersionL.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::LibVersionL.into()], &mut buf)
+            .await?;
         let lib_version_l = buf[0];
         let lib_version: u16 = (lib_version_h as u16) << 8 | lib_version_l as u16;
         self.i2c
-            .write_read(self.address, &[Reg::ControlMode.into()], &mut buf)?;
+            .write_read(self.address, &[Reg::ControlMode.into()], &mut buf)
+            .await?;
         let control_mode = buf[0];
         Ok(Diagnostics {
             power_mode,
