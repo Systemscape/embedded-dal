@@ -1811,6 +1811,8 @@ dependencies = [
 [[package]]
 name = "pas-co2-rs"
 version = "0.1.0-beta.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d3175a6a000f2cb0d9b7768a2af77ba50d3ab06bb4ab2ac361ea6ff775d9dca"
 dependencies = [
  "defmt",
  "embedded-hal 1.0.0",

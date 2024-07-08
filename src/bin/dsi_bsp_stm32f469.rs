@@ -32,7 +32,7 @@ use embassy_stm32::{
     },
     time::{mhz, Hertz},
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::Duration;
 use embedded_dal::{
     config::{Dimensions, Orientation},
@@ -71,11 +71,15 @@ static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 static ALLOCATOR: Heap = Heap::empty();
 
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
-static SCREEN_BRIGHTNESS_SIGNAL: Signal<CriticalSectionRawMutex, ScreenBrightnessCommand> =
-    Signal::new();
-static START_MEASUREMENT_SIGNAL: Signal<CriticalSectionRawMutex, Co2SensorCommand> = Signal::new();
-static TRIGGER_RENDERER: Signal<CriticalSectionRawMutex, Option<slint::platform::WindowEvent>> =
-    Signal::new();
+static SCREEN_BRIGHTNESS_SIGNAL: Channel<CriticalSectionRawMutex, ScreenBrightnessCommand, 20> =
+    Channel::new();
+static TRIGGER_START_MEASUREMENT: Channel<CriticalSectionRawMutex, Co2SensorCommand, 2> =
+    Channel::new();
+static TRIGGER_RENDERER: Channel<
+    CriticalSectionRawMutex,
+    Option<slint::platform::WindowEvent>,
+    20,
+> = Channel::new();
 static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, I2c<'static, Async>>> = StaticCell::new();
 
 #[link_section = ".frame_buffer"]
@@ -558,22 +562,22 @@ fn main() -> ! {
     let window = MainWindow::new().unwrap();
 
     window.on_start_measurement(|| {
-        START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::StartMeasurement)
+        let _ = TRIGGER_START_MEASUREMENT.try_send(Co2SensorCommand::StartMeasurement);
     });
 
     window.on_force_compensation(move || {
         error!("on_force_compensation");
-        START_MEASUREMENT_SIGNAL.signal(Co2SensorCommand::ForceCalibration(500))
+        let _ = TRIGGER_START_MEASUREMENT.try_send(Co2SensorCommand::ForceCalibration(450));
     });
 
     window.on_brightness_increase(move || {
         error!("on_brightness_increase");
-        SCREEN_BRIGHTNESS_SIGNAL.signal(ScreenBrightnessCommand::Increase);
+        let _ = SCREEN_BRIGHTNESS_SIGNAL.try_send(ScreenBrightnessCommand::Increase);
     });
 
     window.on_brightness_decrease(move || {
         error!("on_brightness_decrease");
-        SCREEN_BRIGHTNESS_SIGNAL.signal(ScreenBrightnessCommand::Decrease);
+        let _ = SCREEN_BRIGHTNESS_SIGNAL.try_send(ScreenBrightnessCommand::Decrease);
     });
 
     let window_weak = window.as_weak();
@@ -618,13 +622,13 @@ fn main() -> ! {
     interrupt::UART5.set_priority(Priority::P7);
     let spawner = EXECUTOR_MED.start(interrupt::UART5);
     unwrap!(spawner.spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone())));
+    unwrap!(spawner.spawn(manage_dsi(inner.dsi)));
 
     window.show().unwrap();
 
     info!("Spawning Remaining Tasks");
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(manage_dsi(inner.dsi)));
         unwrap!(spawner.spawn(slint_event_loop(
             sw_window, inner.scb, inner.ltdc, inner.fb1, inner.fb2
         )));
@@ -637,14 +641,18 @@ fn main() -> ! {
 
 #[embassy_executor::task]
 async fn manage_dsi(mut dsi: Dsi<'static>) {
-    let mut screen_brightness = 100;
+    let mut screen_brightness: u8 = 100;
 
     let mut write_closure = |address: u8, data: &[u8]| unwrap!(dsi.write_cmd(0, address, data));
 
     loop {
-        match SCREEN_BRIGHTNESS_SIGNAL.wait().await {
-            ScreenBrightnessCommand::Increase => screen_brightness += 10,
-            ScreenBrightnessCommand::Decrease => screen_brightness -= 10,
+        match SCREEN_BRIGHTNESS_SIGNAL.receive().await {
+            ScreenBrightnessCommand::Increase => {
+                screen_brightness = screen_brightness.checked_add(10).unwrap_or(250)
+            }
+            ScreenBrightnessCommand::Decrease => {
+                screen_brightness = screen_brightness.checked_sub(10).unwrap_or(10)
+            }
         }
 
         screen_brightness = screen_brightness.clamp(10, 250);
@@ -675,6 +683,10 @@ async fn slint_event_loop(
     ));
 
     loop {
+        while let Ok(Some(event)) = TRIGGER_RENDERER.try_receive() {
+            sw_window.dispatch_event(event);
+        }
+
         slint::platform::update_timers_and_animations();
 
         sw_window.draw_if_needed(|renderer| {
@@ -694,16 +706,15 @@ async fn slint_event_loop(
                 info!("waiting for: {}", duration);
                 if let embassy_futures::select::Either::Second(Some(event)) = select(
                     embassy_time::Timer::after(duration.try_into().unwrap()),
-                    TRIGGER_RENDERER.wait(),
+                    TRIGGER_RENDERER.receive(),
                 )
                 .await
                 {
                     sw_window.dispatch_event(event);
                 }
-            } else if let Some(event) = TRIGGER_RENDERER.wait().await {
+            } else if let Some(event) = TRIGGER_RENDERER.receive().await {
                 sw_window.dispatch_event(event);
             }
-            TRIGGER_RENDERER.reset();
         }
     }
 }
@@ -716,6 +727,7 @@ async fn read_touch_screen(
 ) {
     debug!("Entering read_touch_screen");
     let mut last_touch = None;
+
     loop {
         debug!("read_touch_screen loop begin");
         // Remember the current exti pin state. In case it changes during read or rendering.
@@ -749,22 +761,28 @@ async fn read_touch_screen(
         if let Some(event) = event {
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
-            TRIGGER_RENDERER.signal(Some(event));
+            TRIGGER_RENDERER.send(Some(event)).await;
 
             // removes hover state on widgets
             if is_pointer_release_event {
                 // Trigger the rendering loop
-                TRIGGER_RENDERER.signal(Some(slint::platform::WindowEvent::PointerExited));
+                TRIGGER_RENDERER
+                    .send(Some(slint::platform::WindowEvent::PointerExited))
+                    .await;
+                error!("PointerExited sent")
             }
         }
 
-        debug!("read_touch_screen loop end. Waiting for exti...");
-
-        if exti_pin_high {
-            exti.wait_for_low().await;
-        } else {
-            exti.wait_for_high().await;
-        }
+        debug!("read_touch_screen loop end. Waiting for exti with timeout...");
+        // Drop result, an error (i.e., timeout) just means we should continue this task once
+        let _ = embassy_time::with_timeout(Duration::from_secs(1), async {
+            if exti_pin_high {
+                exti.wait_for_low().await;
+            } else {
+                exti.wait_for_high().await;
+            }
+        })
+        .await;
     }
 }
 
@@ -779,8 +797,10 @@ async fn measure_co2(
 
     info!("Status: {}", unwrap!(pas_co2.get_status().await));
 
-    let mut mode = MeasurementMode::default();
-    mode.operating_mode = OperatingMode::Idle;
+    let mode = MeasurementMode {
+        operating_mode: OperatingMode::Idle,
+        ..Default::default()
+    };
     unwrap!(pas_co2.set_measurement_mode(mode).await);
 
     let pressure: u16 = 950; //hPa
@@ -791,12 +811,29 @@ async fn measure_co2(
 
     loop {
         info!("Entering measure_co2 loop");
-        match START_MEASUREMENT_SIGNAL.wait().await {
-            Co2SensorCommand::ForceCalibration(_val) => {
-                warn!("Yielding!");
-                embassy_futures::yield_now().await;
+        match TRIGGER_START_MEASUREMENT.receive().await {
+            Co2SensorCommand::ForceCalibration(val) => {
+                window_weak
+                    .upgrade()
+                    .unwrap()
+                    .set_in_progress("Forcing Calibration!".to_owned().into());
+                window_weak.upgrade().unwrap().set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
+
+                TRIGGER_RENDERER.send(None).await;
+
+                // Give it some time to render the new text
+                embassy_time::Timer::after_millis(700).await;
                 warn!("Performing forced compensation!");
-                //pas_co2                    .do_forced_compensation(val, embassy_time::Delay)                    .unwrap();
+                pas_co2
+                    .do_forced_compensation(val, embassy_time::Delay)
+                    .await
+                    .unwrap();
+
+                window_weak
+                    .upgrade()
+                    .unwrap()
+                    .set_in_progress("".to_owned().into());
+                TRIGGER_RENDERER.send(None).await;
             }
             Co2SensorCommand::StartMeasurement => {
                 info!("Starting Measurement");
@@ -853,7 +890,7 @@ async fn measure_co2(
                 };
                 window.set_background_color(color);
 
-                TRIGGER_RENDERER.signal(None);
+                TRIGGER_RENDERER.sender().send(None).await;
             }
         }
     }
