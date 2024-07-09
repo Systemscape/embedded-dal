@@ -542,18 +542,21 @@ async fn slint_event_loop(
     let mut render_counter: u8 = 0;
 
     loop {
-        // Get all events in the channel
+        // Get all events in the channel and dispatch them to the window
         while let Ok(Some(event)) = TRIGGER_RENDERER.try_receive() {
             sw_window.dispatch_event(event);
         }
 
+        // Advance timers etc.
         slint::platform::update_timers_and_animations();
 
+        // Start rendering
         sw_window.draw_if_needed(|renderer| {
+            // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black :/
             match render_counter {
                 0..=1 => render_counter += 1,
                 2 => {
-                    error!("Setting to SwappedBuffers");
+                    info!("Setting to SwappedBuffers");
                     renderer.set_repaint_buffer_type(
                         slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
                     );
@@ -561,8 +564,8 @@ async fn slint_event_loop(
                 }
                 _ => (),
             }
-            
-            info!("start rendering...");
+
+            debug!("start rendering...");
             renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
 
             scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
@@ -574,19 +577,18 @@ async fn slint_event_loop(
 
         // Try to put the MCU to sleep
         if !sw_window.has_active_animations() {
-            if let Some(duration) = slint::platform::duration_until_next_timer_update() {
-                info!("waiting for: {}", duration);
-                if let embassy_futures::select::Either::Second(Some(event)) = select(
-                    embassy_time::Timer::after(duration.try_into().unwrap()),
-                    TRIGGER_RENDERER.receive(),
-                )
-                .await
-                {
-                    sw_window.dispatch_event(event);
-                }
-            } else if let Some(event) = TRIGGER_RENDERER.receive().await {
-                sw_window.dispatch_event(event);
-            }
+            // When a duration is available, use that. Otherwise continue the loop at least every 10s.
+            let duration = slint::platform::duration_until_next_timer_update()
+                .unwrap_or(core::time::Duration::from_secs(10));
+            debug!("waiting for: {}", duration);
+
+            // Select whatever yields earlier (timer or trigger).
+            // The event from the trigger will be dispatched at the beginning of the loop.
+            let _ = select(
+                embassy_time::Timer::after(duration.try_into().unwrap()),
+                TRIGGER_RENDERER.ready_to_receive(),
+            )
+            .await;
         }
     }
 }
@@ -619,7 +621,7 @@ async fn read_touch_screen(
                     slint::PhysicalPosition::new(state.x as i32, state.y as i32)
                         .to_logical(window_scale_factor);
 
-                //info!("Got Touch: {:#?}", state);
+                trace!("Got Touch: {:#?}", state);
                 Some(match last_touch.replace(position) {
                     Some(_) => slint::platform::WindowEvent::PointerMoved { position },
                     None => slint::platform::WindowEvent::PointerPressed { position, button },
@@ -641,7 +643,7 @@ async fn read_touch_screen(
                 TRIGGER_RENDERER
                     .send(Some(slint::platform::WindowEvent::PointerExited))
                     .await;
-                error!("PointerExited sent")
+                debug!("PointerExited sent")
             }
         }
 
@@ -667,7 +669,7 @@ async fn measure_co2(
     //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
     let mut pas_co2 = PasCo2::new(i2c);
 
-    info!("Status: {}", unwrap!(pas_co2.get_status().await));
+    info!("CO2 Sensor Status: {}", unwrap!(pas_co2.get_status().await));
 
     let mode = MeasurementMode {
         operating_mode: OperatingMode::Idle,

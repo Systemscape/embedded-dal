@@ -17,7 +17,8 @@ impl slint::platform::Platform for Backend {
         &self,
     ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
         /*
-        // Doesn't work for some reason
+        // Doesn't work when using a "manual" eventloop for some reason.
+        // You have to set the SwappedBuffers after 2 rendering cycles.
         let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
             slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
         );
