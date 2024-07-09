@@ -15,7 +15,7 @@ use embassy_stm32::{
     gpio::{Level, Output, Pull, Speed},
     i2c::{self, I2c},
     interrupt,
-    interrupt::{Priority, InterruptExt},
+    interrupt::{InterruptExt, Priority},
     mode::Async,
     peripherals::{self, QUADSPI},
     qspi::{
@@ -539,6 +539,8 @@ async fn slint_event_loop(
         LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
     ));
 
+    let mut render_counter: u8 = 0;
+
     loop {
         // Get all events in the channel
         while let Ok(Some(event)) = TRIGGER_RENDERER.try_receive() {
@@ -548,6 +550,18 @@ async fn slint_event_loop(
         slint::platform::update_timers_and_animations();
 
         sw_window.draw_if_needed(|renderer| {
+            match render_counter {
+                0..=1 => render_counter += 1,
+                2 => {
+                    error!("Setting to SwappedBuffers");
+                    renderer.set_repaint_buffer_type(
+                        slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
+                    );
+                    render_counter += 1
+                }
+                _ => (),
+            }
+            
             info!("start rendering...");
             renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
 
