@@ -7,8 +7,6 @@ use embassy_stm32::{
     peripherals::{DSIHOST, PJ2},
 };
 
-use defmt::info;
-
 use crate::config::{Dimensions, Orientation};
 
 /* 500 MHz / 8 = 62.5 MHz = 62500 kHz */
@@ -150,7 +148,8 @@ impl Dsi<'_> {
         let mut dsi = DsiHost::new(dsi, tepin);
 
         let version = dsi.get_version();
-        defmt::warn!("DSI IP Version: {:x}", version);
+        #[cfg(feature = "defmt")]
+        defmt::info!("DSI IP Version: {:x}", version);
 
         /*
             HAL_DSI_DeInit()
@@ -181,21 +180,26 @@ impl Dsi<'_> {
         */
 
         // Enable regulator (__HAL_DSI_REG_ENABLE)
-        info!("DSIHOST: enabling regulator");
+        #[cfg(feature = "defmt")]
+        defmt::debug!("DSIHOST: enabling regulator");
         DSIHOST.wrpcr().write(|w| w.set_regen(true));
 
         for _ in 1..1000 {
             // The regulator status (ready or not) can be monitored with the RRS flag in the DSI_WISR register.
             // Once it is set, we stop waiting.
             if DSIHOST.wisr().read().rrs() {
-                info!("DSIHOST Regulator ready");
+                #[cfg(feature = "defmt")]
+                defmt::debug!("DSIHOST Regulator ready");
                 break;
             }
             embassy_time::block_for(embassy_time::Duration::from_millis(1));
         }
 
         if !DSIHOST.wisr().read().rrs() {
+            #[cfg(feature = "defmt")]
             defmt::panic!("DSIHOST: enabling regulator FAILED");
+            #[cfg(not(feature = "defmt"))]
+            panic!("DSIHOST: enabling regulator FAILED");
         }
 
         // Set up PLL and enable it
@@ -211,13 +215,17 @@ impl Dsi<'_> {
             // The PLL status (lock or unlock) can be monitored with the PLLLS flag in the DSI_WISR register.
             // Once it is set, we stop waiting.
             if DSIHOST.wisr().read().pllls() {
-                info!("DSIHOST PLL locked");
+                #[cfg(feature = "defmt")]
+                defmt::debug!("DSIHOST PLL locked");
                 break;
             }
         }
 
         if !DSIHOST.wisr().read().pllls() {
+            #[cfg(feature = "defmt")]
             defmt::panic!("DSIHOST: enabling PLL FAILED");
+            #[cfg(not(feature = "defmt"))]
+            panic!("DSIHOST: enabling PLL FAILED");
         }
 
         // ### Set the PHY parameters ###

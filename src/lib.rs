@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod backends;
 pub mod drivers;
 pub mod test_images;
 

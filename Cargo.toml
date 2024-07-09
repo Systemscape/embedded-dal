@@ -20,21 +20,21 @@ stm32f469 = ["dep:embedded-alloc"]
 
 
 [dependencies]
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "defmt",
     "stm32f469ni",
     "unstable-pac",
     "time-driver-any",
     "exti",
 ] }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
     "generic-queue",
 ] }
 
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "task-arena-size-32768",
     "arch-cortex-m",
     "executor-thread",
@@ -44,16 +44,16 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "2
 
 ] }
 
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "defmt",
 ] }
 
 
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "defmt",
 ] }
 
-embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "2a38787a8375675a7c3b8d7d7dc4ca6505734bca", features = [
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
     "defmt",
 ] }
 
@@ -88,9 +88,6 @@ cortex-m = { version = "0.7.6", features = [
 cortex-m-rt = "0.7.0"
 
 num_enum = { version = "0.7", default-features = false }
-
-#pas-co2-rs = { version = "0.1.0-beta.1", git = "ssh://git@github.com/Systemscape/pas-co2-rs.git", features = [    "defmt",] }
-#pas-co2-rs = { path = "../pas-co2-rs", features = ["defmt"] }
 
 pas-co2-rs = "0.1.0-beta.1"
 

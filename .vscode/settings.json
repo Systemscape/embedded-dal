@@ -1,0 +1,16 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+    ],
+    "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.check.noDefaultFeatures": false,
+    "rust-analyzer.cargo.noDefaultFeatures": false,
+    "rust-analyzer.cargo.target": "thumbv7em-none-eabi",
+    "rust-analyzer.cargo.buildScripts.useRustcWrapper": false,
+    "rust-analyzer.check.extraArgs": [
+        "--target",
+        "thumbv7em-none-eabi",
+        "--bin",
+        "pas-co2-stm32f469"
+    ],
+}

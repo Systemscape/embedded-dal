@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
-use core::{cell::RefCell, sync::atomic::AtomicI32};
+use core::sync::atomic::AtomicI32;
 use cortex_m::peripheral::SCB;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
@@ -13,18 +13,16 @@ use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Level, Output, Pull, Speed},
-    i2c,
-    i2c::I2c,
+    i2c::{self, I2c},
     interrupt,
-    interrupt::{InterruptExt, Priority},
+    interrupt::{Priority, InterruptExt},
     mode::Async,
-    peripherals,
-    peripherals::{DSIHOST, EXTI5, LTDC, PG6, PH7, PJ2, PJ5},
+    peripherals::{self, QUADSPI},
     qspi::{
         enums::{
             AddressSize, ChipSelectHighTime, DummyCycles, FIFOThresholdLevel, MemorySize, QspiWidth,
         },
-        Config, TransferConfig,
+        Config, Qspi, TransferConfig,
     },
     rcc::{
         AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv,
@@ -35,10 +33,11 @@ use embassy_stm32::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::Duration;
 use embedded_dal::{
+    backends::slint_embassy::Backend,
     config::{Dimensions, Orientation},
     drivers::{
         dsi::{self, Dsi},
-        ft6x36::Ft6x36,
+        ft6x36::{self, Ft6x36},
         ltdc::{self, Ltdc},
     },
     pixels::ARGB8888,
@@ -127,25 +126,23 @@ bind_interrupts!(struct Irqs {
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
 });
 
-struct StmBackend {
-    window: RefCell<Option<Rc<slint::platform::software_renderer::MinimalSoftwareWindow>>>,
-}
-
-struct StmBackendInner<'a> {
-    scb: cortex_m::peripheral::SCB,
+struct Stm32F469IDisco<'a> {
+    pub scb: cortex_m::peripheral::SCB,
+    pub ltdc: Ltdc<'a>,
+    pub dsi: Dsi<'a>,
+    pub qspi_flash: Qspi<'a, QUADSPI, Async>,
+    pub i2c_bus: &'a mut Mutex<CriticalSectionRawMutex, I2c<'static, Async>>,
+    //pub touch_screen: Ft6x36<I2cDevice<'a, CriticalSectionRawMutex, I2c<'static, Async>>>,
+    pub exti: ExtiInput<'a>,
+    pub fb1: &'a mut [ARGB8888; NUM_PIXELS],
+    pub fb2: &'a mut [ARGB8888; NUM_PIXELS],
     /// Keep the reset pin in a defined state! (Don't `drop()` it after the init function)
     _reset: Output<'a>,
-    ltdc: Ltdc<'a>,
-    dsi: Dsi<'a>,
-    touch_screen: Ft6x36<I2cDevice<'a, CriticalSectionRawMutex, I2c<'static, Async>>>,
-    exti: ExtiInput<'a>,
-    fb1: &'a mut [ARGB8888; NUM_PIXELS],
-    fb2: &'a mut [ARGB8888; NUM_PIXELS],
 }
 
-impl<'a> StmBackendInner<'a> {
+impl<'a> Stm32F469IDisco<'a> {
     #[allow(clippy::too_many_arguments)]
-    fn init(
+    fn init(/*
         dsihost: DSIHOST,
         ltdc: LTDC,
         i2c: I2cDevice<'a, CriticalSectionRawMutex, I2c<'static, Async>>,
@@ -157,13 +154,160 @@ impl<'a> StmBackendInner<'a> {
         fb1: &'a mut [ARGB8888; NUM_PIXELS],
         fb2: &'a mut [ARGB8888; NUM_PIXELS],
         scb: SCB,
-    ) -> StmBackendInner<'a> {
-        /*
-           BSP_LCD_Reset() !!! ALSO RESETS TOUCHSCREEN - Necessary before using TS !!!
-        */
+        */) -> Stm32F469IDisco<'a> {
+        let config = get_board_config();
+
+        info!("Init Embassy...");
+
+        let p = embassy_stm32::init(config);
+
+        info!("Done!");
+
+        let mut sdram = embassy_stm32::fmc::Fmc::sdram_a12bits_d32bits_4banks_bank1(
+            p.FMC,
+            p.PF0, // A0
+            p.PF1,
+            p.PF2,
+            p.PF3,
+            p.PF4,
+            p.PF5,  // A5
+            p.PF12, // A6
+            p.PF13,
+            p.PF14,
+            p.PF15, // A9
+            p.PG0,
+            p.PG1, // A11
+            p.PG4, // BA0
+            p.PG5,
+            p.PD14, // D0
+            p.PD15,
+            p.PD0,
+            p.PD1,
+            p.PE7, // D4
+            p.PE8,
+            p.PE9,
+            p.PE10,
+            p.PE11,
+            p.PE12,
+            p.PE13,
+            p.PE14,
+            p.PE15, // D12
+            p.PD8,
+            p.PD9,
+            p.PD10,
+            p.PH8, // D16
+            p.PH9,
+            p.PH10,
+            p.PH11,
+            p.PH12,
+            p.PH13,
+            p.PH14,
+            p.PH15, // D23
+            p.PI0,
+            p.PI1,
+            p.PI2,
+            p.PI3, // D27
+            p.PI6, // D28
+            p.PI7,
+            p.PI9, // D30
+            p.PI10,
+            p.PE0, // NBL0
+            p.PE1,
+            p.PI4, // NBL2
+            p.PI5,
+            p.PH2,  // SDCKE0
+            p.PG8,  // SDCLK
+            p.PG15, // SDNCAS
+            p.PH3,  // SDNE0
+            p.PF11, // SDNRAS
+            p.PC0,  // SDNWE
+            embedded_dal::drivers::is42s32400f::Is42s32400f6 {},
+        );
+
+        // It has 128 Mbit / 16 MByte of RAM. 4 banks, 1M (=1024 K) x 32 bits
+        // STM32F469 DISCO has 4096 rows by 256 columns by 32 bits on 4 banks
+        let sdram_size = 4096 * 256 * 4 * 4;
+
+        let ram_ptr: *mut u32 = sdram.init(&mut embassy_time::Delay) as *mut _;
+
+        let ram_slice = unsafe {
+            info!("RAM ADDR: {:x}", ram_ptr as u32);
+
+            // Convert raw pointer to slice
+            core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u32>())
+        };
+
+        info!("Erasing RAM...");
+        ram_slice.fill(0x00);
+        info!("Done!");
+
+        // Safety: This must only be called once after initializing the RAM
+        let (fb1, fb2) = unsafe {
+            (
+                &mut *core::ptr::addr_of_mut!(FB1),
+                &mut *core::ptr::addr_of_mut!(FB2),
+            )
+        };
+
+        let qspi_flash_config = Config {
+            memory_size: MemorySize::_128MiB,
+            address_size: AddressSize::_24bit, // 24 bit according to STM32469discovery BSP
+            prescaler: 1, // Max 90 MHz. QSPI is on AHB3 and that is set to 180 MHz so divided by 2 that's 90 MHz. TODO: Make this depend on the actualy frequency? How to obtain it from embassy?
+            cs_high_time: ChipSelectHighTime::_5Cycle, // 5 cycles according to STM32469discovery BSP
+            fifo_threshold: FIFOThresholdLevel::_1Bytes, // 1 byte according to STM32469discovery BSP
+        };
+
+        // MT25QL128ABA1EW9-0SIT according to schetmatic
+        let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bank1(
+            p.QUADSPI,
+            p.PF8,
+            p.PF9,
+            p.PF7,
+            p.PF6,
+            p.PF10,
+            p.PB6,
+            p.DMA2_CH7,
+            qspi_flash_config,
+        );
+
+        let mut buf = [0u8; 8];
+        let transaction = TransferConfig {
+            iwidth: QspiWidth::SING,
+            awidth: QspiWidth::SING,
+            dwidth: QspiWidth::QUAD,
+            instruction: 0x6B,
+            address: Some(0x00000000),
+            dummy: DummyCycles::_8,
+        };
+        qspi_flash.blocking_read(&mut buf, transaction);
+
+        warn!("Read QSPI bytes: {:#?}", buf);
+
+        let mut cp = unwrap!(cortex_m::Peripherals::take());
+        cp.SCB.disable_dcache(&mut cp.CPUID);
+
+        unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
+
+        let mut config = embassy_stm32::i2c::Config::default();
+        config.sda_pullup = true;
+        config.scl_pullup = true;
+
+        let i2c = embassy_stm32::i2c::I2c::new(
+            p.I2C1,
+            p.PB8,
+            p.PB9,
+            Irqs,
+            p.DMA1_CH6,
+            p.DMA1_CH0,
+            Hertz(400_000),
+            config,
+        );
+
+        let i2c_bus = Mutex::new(i2c);
+        let i2c_bus = I2C_BUS.init(i2c_bus);
 
         // According to UM for the discovery kit, PH7 is an active-low reset for the LCD and touchsensor
-        let mut reset = Output::new(ph7, Level::Low, Speed::High);
+        let mut reset = Output::new(p.PH7, Level::Low, Speed::High);
 
         // CubeMX example waits 20 ms before de-asserting reset. Must be at least 5ms for the touch screen.
         embassy_time::block_for(embassy_time::Duration::from_millis(20));
@@ -172,68 +316,15 @@ impl<'a> StmBackendInner<'a> {
         reset.set_high();
         embassy_time::block_for(embassy_time::Duration::from_millis(140));
 
-        // BEGIN TOUCHSCREEN
-
-        // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
-        //embassy_time::block_for(embassy_time::Duration::from_millis(160));
-
-        let mut touch_screen = embedded_dal::drivers::ft6x36::Ft6x36::new(
-            i2c,
-            0x38,
-            embedded_dal::drivers::ft6x36::Dimension {
-                x: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
-                y: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
-            },
-        );
-
-        debug!("Init touch_screen");
-        unwrap!(embassy_futures::block_on(touch_screen.init()));
-        touch_screen.set_orientation(match LCD_ORIENTATION {
-            Orientation::Landscape => embedded_dal::drivers::ft6x36::Orientation::Landscape,
-            Orientation::Portrait => embedded_dal::drivers::ft6x36::Orientation::Portrait,
-        });
-
-        match touch_screen.get_info() {
-            Some(info) => info!("Got touch screen info: {:#?}", info),
-            None => warn!("No info"),
-        }
-
-        let diag = unwrap!(embassy_futures::block_on(touch_screen.get_diagnostics()));
-        info!("Got touch screen diag: {:#?}", diag);
-
-        // END TOUCHSCREEN
-
         //let mut led = Output::new(pg6, Level::High, Speed::Low); // Currently unused
-
-        /*
-        BSP_LCD_MspInit() // This will set IP blocks LTDC, DSI and DMA2D => We should be fine with what Embassy does.
-         */
 
         let dsi_config = dsi::Config::stm32f469_disco(LCD_ORIENTATION);
 
-        let mut ltdc = ltdc::Ltdc::new(ltdc, &dsi_config);
+        let mut ltdc = ltdc::Ltdc::new(p.LTDC, &dsi_config);
 
-        let mut dsi = Dsi::new(dsihost, pj2, &dsi_config);
-
-        /*
-        ######################################
-         BEGIN HAL_DSI_Start()
-        ######################################
-        */
+        let mut dsi = Dsi::new(p.DSIHOST, p.PJ2, &dsi_config);
 
         dsi.enable();
-
-        /*
-        ######################################
-         END HAL_DSI_Start()
-        ######################################
-        */
-
-        /*
-        ######################################
-         BEGIN NT35510_Init(()
-        ######################################
-        */
 
         // FIXME: This should probably be done with a trait or so...
         let mut write_closure = |address: u8, data: &[u8]| unwrap!(dsi.write_cmd(0, address, data));
@@ -243,12 +334,6 @@ impl<'a> StmBackendInner<'a> {
             embassy_time::Delay,
             LCD_ORIENTATION,
         );
-
-        /*
-        ######################################
-         END NT35510_Init(()
-        ######################################
-        */
 
         ltdc.config_layer(
             ltdc::Window {
@@ -272,47 +357,17 @@ impl<'a> StmBackendInner<'a> {
             unsafe { &FB1[0] as *const _ as u32 },
         );
 
-        /*
-        ######################################
-         END HAL_LTDC_ConfigLayer()  and LTDC_SetConfig() for Layer 0
-        ######################################
-        */
-
         Self {
-            scb,
-            _reset: reset,
+            scb: cp.SCB,
             ltdc,
             dsi,
-            touch_screen,
-            exti: embassy_stm32::exti::ExtiInput::new(pj5, exti5, Pull::None),
+            qspi_flash,
+            i2c_bus,
+            exti: embassy_stm32::exti::ExtiInput::new(p.PJ5, p.EXTI5, Pull::None),
             fb1,
             fb2,
+            _reset: reset,
         }
-    }
-}
-
-impl slint::platform::Platform for StmBackend {
-    fn create_window_adapter(
-        &self,
-    ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-        /*
-        // Doesn't work for some reason
-        let window = slint::platform::software_renderer::MinimalSoftwareWindow::new(
-            slint::platform::software_renderer::RepaintBufferType::SwappedBuffers,
-        );
-        self.window.replace(Some(window.clone()));
-        Ok(window)
-        */
-        Ok(self.window.borrow_mut().clone().unwrap().clone())
-    }
-
-    fn duration_since_start(&self) -> core::time::Duration {
-        core::time::Duration::from_micros(embassy_time::Instant::now().as_micros())
-    }
-
-    fn debug_log(&self, arguments: core::fmt::Arguments) {
-        use alloc::string::ToString;
-        defmt::println!("{=str}", arguments.to_string());
     }
 }
 
@@ -322,241 +377,45 @@ fn main() -> ! {
         SystemClock_Config()
     */
 
-    let config = get_board_config();
+    let mut board = Stm32F469IDisco::init();
 
-    info!("Init Embassy...");
+    // BEGIN TOUCHSCREEN
 
-    let p = embassy_stm32::init(config);
+    // "Time of starting to report point after resetting" according to TS datasheet is 300 ms after reset
+    //embassy_time::block_for(embassy_time::Duration::from_millis(160));
 
-    info!("Done!");
-
-    let mut sdram = embassy_stm32::fmc::Fmc::sdram_a12bits_d32bits_4banks_bank1(
-        p.FMC,
-        p.PF0, // A0
-        p.PF1,
-        p.PF2,
-        p.PF3,
-        p.PF4,
-        p.PF5,  // A5
-        p.PF12, // A6
-        p.PF13,
-        p.PF14,
-        p.PF15, // A9
-        p.PG0,
-        p.PG1, // A11
-        p.PG4, // BA0
-        p.PG5,
-        p.PD14, // D0
-        p.PD15,
-        p.PD0,
-        p.PD1,
-        p.PE7, // D4
-        p.PE8,
-        p.PE9,
-        p.PE10,
-        p.PE11,
-        p.PE12,
-        p.PE13,
-        p.PE14,
-        p.PE15, // D12
-        p.PD8,
-        p.PD9,
-        p.PD10,
-        p.PH8, // D16
-        p.PH9,
-        p.PH10,
-        p.PH11,
-        p.PH12,
-        p.PH13,
-        p.PH14,
-        p.PH15, // D23
-        p.PI0,
-        p.PI1,
-        p.PI2,
-        p.PI3, // D27
-        p.PI6, // D28
-        p.PI7,
-        p.PI9, // D30
-        p.PI10,
-        p.PE0, // NBL0
-        p.PE1,
-        p.PI4, // NBL2
-        p.PI5,
-        p.PH2,  // SDCKE0
-        p.PG8,  // SDCLK
-        p.PG15, // SDNCAS
-        p.PH3,  // SDNE0
-        p.PF11, // SDNRAS
-        p.PC0,  // SDNWE
-        embedded_dal::drivers::is42s32400f::Is42s32400f6 {},
+    let mut touch_screen = Ft6x36::new(
+        I2cDevice::new(board.i2c_bus),
+        0x38,
+        ft6x36::Dimension {
+            x: LCD_DIMENSIONS.get_height(LCD_ORIENTATION),
+            y: LCD_DIMENSIONS.get_width(LCD_ORIENTATION),
+        },
     );
 
-    // It has 128 Mbit / 16 MByte of RAM. 4 banks, 1M (=1024 K) x 32 bits
-    // STM32F469 DISCO has 4096 rows by 256 columns by 32 bits on 4 banks
-    let sdram_size = 4096 * 256 * 4 * 4;
-
-    let ram_ptr: *mut u32 = sdram.init(&mut embassy_time::Delay) as *mut _;
-
-    let ram_slice = unsafe {
-        info!("RAM ADDR: {:x}", ram_ptr as u32);
-
-        // Convert raw pointer to slice
-        core::slice::from_raw_parts_mut(ram_ptr, sdram_size / core::mem::size_of::<u32>())
-    };
-
-    // // ----------------------------------------------------------
-    // // Use memory in SDRAM
-    info!("RAM contents before writing: {:x}", ram_slice[..10]);
-
-    let test_slice: &[u32; 10] = &[1u32, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-    ram_slice[..10].copy_from_slice(test_slice);
-    ram_slice[ram_slice.len() - 1] = 0x12; // Ensure we can write until the end
-
-    info!("RAM contents after writing: {:x}", unsafe {
-        core::ptr::read_volatile(ram_slice[..20].as_ptr() as *const [u32; 20])
+    debug!("Init touch_screen");
+    unwrap!(embassy_futures::block_on(touch_screen.init()));
+    touch_screen.set_orientation(match LCD_ORIENTATION {
+        Orientation::Landscape => ft6x36::Orientation::Landscape,
+        Orientation::Portrait => ft6x36::Orientation::Portrait,
     });
 
-    crate::assert_eq!(ram_slice[..10], test_slice[..10]);
-    crate::assert_eq!(ram_slice[ram_slice.len() - 1], 0x12); // Ensure we can read until the end
-
-    info!("Erasing RAM...");
-    ram_slice.fill(0x00);
-    info!("Done!");
-
-    let config = Config {
-        memory_size: MemorySize::_128MiB,
-        address_size: AddressSize::_24bit, // 24 bit according to STM32469discovery BSP
-        prescaler: 1, // Max 90 MHz. QSPI is on AHB3 and that is set to 180 MHz so divided by 2 that's 90 MHz. TODO: Make this depend on the actualy frequency? How to obtain it from embassy?
-        cs_high_time: ChipSelectHighTime::_5Cycle, // 5 cycles according to STM32469discovery BSP
-        fifo_threshold: FIFOThresholdLevel::_1Bytes, // 1 byte according to STM32469discovery BSP
-    };
-
-    // MT25QL128ABA1EW9-0SIT according to schetmatic
-    let mut qspi_flash = embassy_stm32::qspi::Qspi::new_bank1(
-        p.QUADSPI, p.PF8, p.PF9, p.PF7, p.PF6, p.PF10, p.PB6, p.DMA2_CH7, config,
-    );
-
-    let mut buf = [0u8; 8];
-    let transaction = TransferConfig {
-        iwidth: QspiWidth::SING,
-        awidth: QspiWidth::SING,
-        dwidth: QspiWidth::QUAD,
-        instruction: 0x6B,
-        address: Some(0x00000000),
-        dummy: DummyCycles::_8,
-    };
-    qspi_flash.blocking_read(&mut buf, transaction);
-
-    warn!("Read QSPI bytes: {:#?}", buf);
-
-    embassy_time::block_for(Duration::from_millis(2000));
-
-    extern "C" {
-        static mut __s_slint_assets: u8;
-        static __e_slint_assets: u8;
-        static __si_slint_assets: u8;
+    match touch_screen.get_info() {
+        Some(info) => info!("Got touch screen info: {:#?}", info),
+        None => warn!("No info"),
     }
 
-    unsafe {
-        warn!(
-            "__s_slint_assets: {:x}",
-            core::ptr::addr_of!(__s_slint_assets) as usize
-        );
-        warn!(
-            "__e_slint_assets: {:x}",
-            core::ptr::addr_of!(__e_slint_assets) as usize
-        );
-        warn!(
-            "__si_slint_assets: {:#x}",
-            core::ptr::addr_of!(__si_slint_assets) as usize
-        );
+    let diag = unwrap!(embassy_futures::block_on(touch_screen.get_diagnostics()));
+    info!("Got touch screen diag: {:#?}", diag);
 
-        let asset_mem_slice = core::slice::from_raw_parts_mut(
-            core::ptr::addr_of_mut!(__s_slint_assets),
-            core::ptr::addr_of!(__e_slint_assets) as usize
-                - core::ptr::addr_of!(__s_slint_assets) as usize,
-        );
-
-        let mut asset_flash_addr = core::ptr::addr_of!(__si_slint_assets) as usize - 0x9000_0000;
-
-        //defmt::assert!(asset_mem_slice.len() > 0);
-
-        for chunk in asset_mem_slice.chunks_mut(32) {
-            let transaction = TransferConfig {
-                iwidth: QspiWidth::SING,
-                awidth: QspiWidth::SING,
-                dwidth: QspiWidth::QUAD,
-                instruction: 0x6B,
-                address: Some(asset_flash_addr as u32),
-                dummy: DummyCycles::_8,
-            };
-
-            qspi_flash.blocking_read(chunk, transaction);
-
-            asset_flash_addr += chunk.len();
-        }
-    }
-
-    let mut cp = unwrap!(cortex_m::Peripherals::take());
-    cp.SCB.disable_dcache(&mut cp.CPUID);
-
-    unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
-
-    /*
-    unsafe { ALLOCATOR.init(heap.as_mut_ptr() as usize, HEAP_SIZE) }
-    const FB_SIZE_BYTES: usize = NUM_PIXELS * core::mem::size_of::<ARGB8888>();
-    let (fb1, fb2) = unsafe {
-        (
-            core::slice::from_raw_parts_mut(fb1.as_mut_ptr() as *mut ARGB8888, NUM_PIXELS)
-                .try_into()
-                .unwrap(),
-            core::slice::from_raw_parts_mut(fb2.as_mut_ptr() as *mut ARGB8888, NUM_PIXELS)
-                .try_into()
-                .unwrap(),
-        )
-    };
-    */
-
-    let mut config = embassy_stm32::i2c::Config::default();
-    config.sda_pullup = true;
-    config.scl_pullup = true;
-
-    let i2c = embassy_stm32::i2c::I2c::new(
-        p.I2C1,
-        p.PB8,
-        p.PB9,
-        Irqs,
-        p.DMA1_CH6,
-        p.DMA1_CH0,
-        Hertz(400_000),
-        config,
-    );
-
-    let i2c_bus = Mutex::new(i2c);
-    let i2c_bus = I2C_BUS.init(i2c_bus);
-
-    let i2c_dev1 = I2cDevice::new(i2c_bus);
-
-    // Safety: The Refcell at the beginning of `run_event_loop` prevents re-entrancy and thus multiple mutable references to FB1/FB2.
-    let (fb1, fb2) = unsafe {
-        (
-            &mut *core::ptr::addr_of_mut!(FB1),
-            &mut *core::ptr::addr_of_mut!(FB2),
-        )
-    };
-
-    let inner = StmBackendInner::init(
-        p.DSIHOST, p.LTDC, i2c_dev1, p.PG6, p.PJ2, p.PJ5, p.PH7, p.EXTI5, fb1, fb2, cp.SCB,
-    );
-
-    // ### Init Backend ###
-    info!("Init StmBackend...");
+    info!("Init Backend...");
     let sw_window = MinimalSoftwareWindow::new(Default::default());
-    slint::platform::set_platform(Box::new(StmBackend {
-        window: RefCell::new(Some(sw_window.clone())),
-    }))
+    slint::platform::set_platform(Box::new(Backend::new(
+        sw_window.clone(),
+        &mut board.qspi_flash,
+    )))
     .expect("backend already initialized");
+
     info!("StmBackend initialized!");
 
     let window = MainWindow::new().unwrap();
@@ -602,13 +461,12 @@ fn main() -> ! {
         },
     );
 
-    let touch_screen = inner.touch_screen;
-    let exti = inner.exti;
+    let exti = board.exti;
 
     info!("Spawning Touchscreen Task");
     // High-priority executor: UART4, priority level 6
-    interrupt::UART4.set_priority(Priority::P6);
-    let spawner = EXECUTOR_HIGH.start(interrupt::UART4);
+    embassy_stm32::interrupt::UART4.set_priority(Priority::P6);
+    let spawner = EXECUTOR_HIGH.start(embassy_stm32::interrupt::UART4);
     unwrap!(spawner.spawn(read_touch_screen(
         touch_screen,
         exti,
@@ -619,10 +477,13 @@ fn main() -> ! {
 
     info!("Spawning CO2 Measurement Task");
     // Medium-priority executor: UART5, priority level 7
-    interrupt::UART5.set_priority(Priority::P7);
-    let spawner = EXECUTOR_MED.start(interrupt::UART5);
-    unwrap!(spawner.spawn(measure_co2(I2cDevice::new(i2c_bus), window_weak.clone())));
-    unwrap!(spawner.spawn(manage_dsi(inner.dsi)));
+    embassy_stm32::interrupt::UART5.set_priority(Priority::P7);
+    let spawner = EXECUTOR_MED.start(embassy_stm32::interrupt::UART5);
+    unwrap!(spawner.spawn(measure_co2(
+        I2cDevice::new(board.i2c_bus),
+        window_weak.clone()
+    )));
+    unwrap!(spawner.spawn(manage_dsi(board.dsi)));
 
     window.show().unwrap();
 
@@ -630,13 +491,9 @@ fn main() -> ! {
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(slint_event_loop(
-            sw_window, inner.scb, inner.ltdc, inner.fb1, inner.fb2
+            sw_window, board.scb, board.ltdc, board.fb1, board.fb2
         )));
     });
-
-    //window.hide().unwrap();
-
-    //window.run().unwrap();
 }
 
 #[embassy_executor::task]
@@ -683,6 +540,7 @@ async fn slint_event_loop(
     ));
 
     loop {
+        // Get all events in the channel
         while let Ok(Some(event)) = TRIGGER_RENDERER.try_receive() {
             sw_window.dispatch_event(event);
         }
@@ -817,7 +675,10 @@ async fn measure_co2(
                     .upgrade()
                     .unwrap()
                     .set_in_progress("Forcing Calibration!".to_owned().into());
-                window_weak.upgrade().unwrap().set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
+                window_weak
+                    .upgrade()
+                    .unwrap()
+                    .set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
 
                 TRIGGER_RENDERER.send(None).await;
 
