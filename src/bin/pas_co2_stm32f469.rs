@@ -31,7 +31,7 @@ use embassy_stm32::{
     time::{mhz, Hertz},
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
-use embassy_time::Duration;
+use embassy_time::{Duration, Timer};
 use embedded_dal::{
     backends::slint_embassy::Backend,
     config::{Dimensions, Orientation},
@@ -502,6 +502,7 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
 
     let mut write_closure = |address: u8, data: &[u8]| unwrap!(dsi.write_cmd(0, address, data));
 
+    // Increase or decrease screen brightness whenever the signal is received. But make sure it stays in the range [10, 250].
     loop {
         match SCREEN_BRIGHTNESS_SIGNAL.receive().await {
             ScreenBrightnessCommand::Increase => {
@@ -512,6 +513,7 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
             }
         }
 
+        // This ensure the Decrease cannot set it to 0. TODO: Make this more concise...
         screen_brightness = screen_brightness.clamp(10, 250);
 
         info!("Setting screen brightness to {}", screen_brightness);
@@ -585,7 +587,7 @@ async fn slint_event_loop(
             // Select whatever yields earlier (timer or trigger).
             // The event from the trigger will be dispatched at the beginning of the loop.
             let _ = select(
-                embassy_time::Timer::after(duration.try_into().unwrap()),
+                Timer::after(duration.try_into().unwrap()),
                 TRIGGER_RENDERER.ready_to_receive(),
             )
             .await;
@@ -632,6 +634,7 @@ async fn read_touch_screen(
                 .map(|position| slint::platform::WindowEvent::PointerReleased { position, button }),
         };
 
+        // Send the event to eventloop
         if let Some(event) = event {
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
@@ -648,7 +651,8 @@ async fn read_touch_screen(
         }
 
         debug!("read_touch_screen loop end. Waiting for exti with timeout...");
-        // Drop result, an error (i.e., timeout) just means we should continue this task once
+
+        // Drop result. In case of an error (i.e., timeout), we just continue the loop.
         let _ = embassy_time::with_timeout(Duration::from_secs(1), async {
             if exti_pin_high {
                 exti.wait_for_low().await;
@@ -665,8 +669,10 @@ async fn measure_co2(
     i2c: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
     window_weak: Weak<MainWindow>,
 ) {
-    debug!("measure_co2 begin");
-    //let pas_co2 = pas_co2_stat.init(PasCo2::new(embedded_hal_bus::i2c::RefCellDevice::new(i2c)));
+    debug!("measure_co2 task begin");
+
+    let window = unwrap!(window_weak.upgrade());
+
     let mut pas_co2 = PasCo2::new(i2c);
 
     info!("CO2 Sensor Status: {}", unwrap!(pas_co2.get_status().await));
@@ -678,39 +684,35 @@ async fn measure_co2(
     unwrap!(pas_co2.set_measurement_mode(mode).await);
 
     let pressure: u16 = 950; //hPa
-
     unwrap!(pas_co2.set_pressure_compensation(pressure).await);
 
-    embassy_time::Delay {}.delay_ms(1000).await;
+    // Wait a bit for the sensor to settle and give other tasks time to run.
+    Timer::after_secs(1).await;
 
     loop {
         info!("Entering measure_co2 loop");
         match TRIGGER_START_MEASUREMENT.receive().await {
             Co2SensorCommand::ForceCalibration(val) => {
-                window_weak
-                    .upgrade()
-                    .unwrap()
-                    .set_in_progress("Forcing Calibration!".to_owned().into());
-                window_weak
-                    .upgrade()
-                    .unwrap()
-                    .set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
+                window.set_in_progress("Forcing Calibration!".to_owned().into());
+                window.set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
 
+                // Make it render the changed text and color...
                 TRIGGER_RENDERER.send(None).await;
+                // ... and give the renderer some time to do so
+                Timer::after_millis(500).await;
 
-                // Give it some time to render the new text
-                embassy_time::Timer::after_millis(700).await;
                 warn!("Performing forced compensation!");
                 pas_co2
                     .do_forced_compensation(val, embassy_time::Delay)
                     .await
                     .unwrap();
 
-                window_weak
-                    .upgrade()
-                    .unwrap()
-                    .set_in_progress("".to_owned().into());
+                window.set_in_progress("".to_owned().into());
+
+                // Make it render the changed text...
                 TRIGGER_RENDERER.send(None).await;
+                // ... and give the renderer some time to do so
+                Timer::after_millis(500).await;
             }
             Co2SensorCommand::StartMeasurement => {
                 info!("Starting Measurement");
@@ -721,8 +723,6 @@ async fn measure_co2(
                     warn!("Last measurement less than 10 sec ago. Not measuring this time!");
                     continue;
                 }
-
-                let window = unwrap!(window_weak.upgrade());
 
                 let status = unwrap!(pas_co2.get_status().await);
                 info!("Status: {}", status);
@@ -748,13 +748,21 @@ async fn measure_co2(
 
                 window.set_status_text(status_text.into());
 
+                // Make it render the changed text.
+                // It will get some time to render while we wait for the measurement to complete.
+                TRIGGER_RENDERER.send(None).await;
+
+                // Trigger a measurement
                 unwrap!(pas_co2.start_measurement().await);
                 TIME_LAST.store(
                     embassy_time::Instant::now().as_secs() as i32,
                     core::sync::atomic::Ordering::Relaxed,
                 );
+
+                // Sensor takes around 1s to complete a measurement
                 embassy_time::Delay.delay_ms(1150).await;
 
+                // Read the measured value
                 let co2_ppm = unwrap!(pas_co2.get_co2_ppm().await);
 
                 info!("CO2 PPM: {}", co2_ppm);
@@ -767,6 +775,7 @@ async fn measure_co2(
                 };
                 window.set_background_color(color);
 
+                // Make it render the changed text.
                 TRIGGER_RENDERER.sender().send(None).await;
             }
         }
