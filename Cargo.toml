@@ -68,7 +68,7 @@ stm32-fmc = { version = "0.3", default-features = false, features = [
 ], optional = true }
 
 
-slint = { version = "1.6", default-features = false, features = [
+slint = { version = "1.7.1", default-features = false, features = [
     "compat-1-2",
     "renderer-software",
     "libm",
@@ -93,7 +93,7 @@ pas-co2-rs = "0.1.0-beta.1"
 
 
 [build-dependencies]
-slint-build = { version = "1.6" }
+slint-build = { version = "1.7.1" }
 
 [badges]
 maintenance = { status = "actively-developed" }

@@ -448,11 +448,14 @@ fn main() -> ! {
         move || window_weak.clone().unwrap().invoke_start_measurement(),
     );
 
+    // Trigger one measruement, so we don't wait for 60 seconds before the first measurement.
+    let _ = TRIGGER_START_MEASUREMENT.try_send(Co2SensorCommand::StartMeasurement);
+
     let window_weak = window.as_weak();
     let time_since_last = slint::Timer::default();
     time_since_last.start(
         slint::TimerMode::Repeated,
-        core::time::Duration::from_secs(5),
+        core::time::Duration::from_secs(1),
         move || {
             let window = unwrap!(window_weak.clone().upgrade());
             let time_last = TIME_LAST.load(core::sync::atomic::Ordering::Relaxed);
