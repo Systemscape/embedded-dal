@@ -1,6 +1,7 @@
 /// FT6x36 driver based on the [ft6x36-rs](https://github.com/pyaillet/ft6x36-rs/tree/main) project.
 ///
-/// Gesture recognition apparently requires some custom firmware for the chip that is usually not present. So this is not implemented attempts from the original
+/// Gesture recognition apparently requires some custom firmware for the chip that is usually not present.
+/// The original driver already implements a workaround.
 use embedded_hal_async::i2c::{ErrorType, I2c, SevenBitAddress};
 use num_enum::{FromPrimitive, IntoPrimitive};
 
