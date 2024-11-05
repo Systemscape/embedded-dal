@@ -13,6 +13,7 @@ readme = "README.md"
 
 [features]
 default = ["defmt", "event_process", "fmc", "stm32f469"]
+serde = ["dep:serde"]
 defmt = ["dep:defmt"]
 event_process = []
 fmc = ["dep:stm32-fmc"]
@@ -20,21 +21,21 @@ stm32f469 = ["dep:embedded-alloc"]
 
 
 [dependencies]
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "defmt",
     "stm32f469ni",
     "unstable-pac",
     "time-driver-any",
     "exti",
 ] }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "defmt",
     "defmt-timestamp-uptime",
     "tick-hz-32_768",
     "generic-queue",
 ] }
 
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "task-arena-size-32768",
     "arch-cortex-m",
     "executor-thread",
@@ -44,16 +45,16 @@ embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "6
 
 ] }
 
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "defmt",
 ] }
 
 
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "defmt",
 ] }
 
-embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "6636a5835b27f82abea9000c9f3e93b4455b29c8", features = [
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "3d8e987bf3ee8370b4532da73c9ba19ac0f437f7", features = [
     "defmt",
 ] }
 
@@ -61,20 +62,20 @@ embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "66
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 
-static_cell = "2.1"
+static_cell = "2.1.0"
 
-stm32-fmc = { version = "0.3", default-features = false, features = [
+stm32-fmc = { version = "0.3.2", default-features = false, features = [
     "sdram",
 ], optional = true }
 
 
-slint = { version = "1.7.1", default-features = false, features = [
+slint = { version = "1.8.0", default-features = false, features = [
     "compat-1-2",
     "renderer-software",
     "libm",
     "unsafe-single-threaded",
 ] }
-embedded-alloc = { version = "0.5", optional = true }
+embedded-alloc = { version = "0.6", optional = true, features = ["llff"] }
 
 defmt = { version = "0.3", optional = true }
 defmt-rtt = "0.4"
@@ -91,9 +92,10 @@ num_enum = { version = "0.7", default-features = false }
 
 pas-co2-rs = "0.1.0-beta.1"
 
+serde = { version = "1.0", optional = true }
 
 [build-dependencies]
-slint-build = { version = "1.7.1" }
+slint-build = { version = "1.8.0" }
 
 [badges]
 maintenance = { status = "actively-developed" }

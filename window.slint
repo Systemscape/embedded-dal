@@ -1,6 +1,33 @@
 import { Button } from "std-widgets.slint";
 
+
+component MyButton inherits Rectangle {
+    in-out property text <=> txt.text;
+    in-out property font-size <=> txt.font-size;
+    in property<length> button-height: txt.preferred-height * 1.6;
+    callback clicked <=> touch.clicked;
+
+    border-radius: root.height / 2;
+    border-width: 3px;
+    border-color: root.background.darker(45%);
+    background: touch.pressed ? #6b8282 : touch.has-hover ? #6c616c : lightgray;
+
+    height: button-height;
+    min-width: txt.preferred-width + 20px;
+
+    txt := Text {
+        x: (parent.width - self.width) / 2 + (touch.pressed ? 2px : 0);
+        y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0);
+        color: touch.pressed ? darkgray : black;
+    }
+
+    touch := TouchArea { }
+}
+
+
 export component MainWindow inherits Window {
+    default-font-size: 30pt;
+
     title: "CO2 Monitor";
     min-width: 800px;
     min-height: 480px;
@@ -18,29 +45,20 @@ export component MainWindow inherits Window {
     callback brightness_decrease();
     callback force_compensation();
 
-    border := Rectangle {
-        width: 100%;
-        height: 100%;
-        background: background_color;
-    }
-
-    Rectangle {
-        x: 50px;
-        y: 50px;
-        width: root.width - 2 * self.x;
-        height: root.height - 2 * self.y;
-        background: white;
-    }
 
     co2text := Text {
-        horizontal-alignment: center;
+        wrap: TextWrap.word-wrap;
+        //horizontal-alignment: center;
+        y: 110px;
         text: co2_ppm;
         font-size: 280px;
+        letter-spacing: 0px;
+        color: black;
     }
 
     Text {
         x: 60px;
-        y: 400px;
+        y: 440px;
         horizontal-alignment: left;
         text: status_text;
         font-size: 20px;
@@ -48,7 +66,7 @@ export component MainWindow inherits Window {
 
     Text {
         x: 60px;
-        y: 80px;
+        y: 85px;
         horizontal-alignment: left;
         text: "Letzte Messung: " + time_since_last + " s";
         font-size: 20px;
@@ -70,24 +88,38 @@ export component MainWindow inherits Window {
             debug("start_measurement()");
             root.start_measurement();
         }
+        border := Rectangle {
+            width: 189px;
+            x: 51px;
+            y: 20px;
+            height: 50px;
+            background: background_color;
+            border-radius: root.height / 2;
+        }
     }
 
     HorizontalLayout {
         height: 60px;
         width: 150px;
         spacing: 20px;
-        y: 360px;
-        x: 590px;
-        Button {
+        y: 400px;
+        x: 560px;
+        MyButton {
             text: "+";
+            font-size: 20pt;
+            button-height: 60px;
+            width: 100px;
             clicked => {
                 brightness_increase();
                 debug("brightness_increase()");
             }
         }
 
-        Button {
-            text: "--";
+        MyButton {
+            text: "–";
+            font-size: 20pt;
+            button-height: 60px;
+            width: 100px;
             clicked => {
                 brightness_decrease();
                 debug("brightness_decrease()");
@@ -95,16 +127,20 @@ export component MainWindow inherits Window {
         }
     }
 
-    Button {
+    MyButton {
         text: "FORCE COMP.";
-        height: 50px;
-        x: 600px;
-        y: 70px;
+        height: 71px;
+        x: 550px;
+        y: 15px;
+
+        min-width: 0px;
+        width: 229px;
+
+        font-size: 20pt;
 
         clicked => {
             force_compensation();
             debug("force_compensation()");
         }
     }
-    
 }

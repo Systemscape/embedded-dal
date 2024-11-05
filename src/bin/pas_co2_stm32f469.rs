@@ -61,7 +61,7 @@ const LCD_DIMENSIONS: Dimensions = Dimensions::from(800, 480);
 const NUM_PIXELS: usize = LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as usize
     * LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as usize;
 
-use embedded_alloc::Heap;
+use embedded_alloc::LlffHeap as Heap;
 
 const HEAP_SIZE: usize = 250 * 1024;
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
