@@ -1,7 +1,6 @@
+#[allow(unused)]
 /// ISI IS42S32400F SDRAM
 /// Waiting for https://github.com/stm32-rs/stm32-fmc/pull/14 to be merged
-#[allow(unused)]
-
 /// Speed Grade 6
 use stm32_fmc::{SdramChip, SdramConfiguration, SdramTiming};
 

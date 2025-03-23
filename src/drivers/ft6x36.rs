@@ -632,7 +632,7 @@ where
             .write_read(self.address, &[Reg::LibVersionL.into()], &mut buf)
             .await?;
         let lib_version_l = buf[0];
-        let lib_version: u16 = (lib_version_h as u16) << 8 | lib_version_l as u16;
+        let lib_version: u16 = ((lib_version_h as u16) << 8) | lib_version_l as u16;
         self.i2c
             .write_read(self.address, &[Reg::ControlMode.into()], &mut buf)
             .await?;

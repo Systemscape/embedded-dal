@@ -14,7 +14,6 @@
         //"chip": "STM32F767ZITx", //!MODIFY
         "flashingConfig": {
           "flashingEnabled": true,
-          "resetAfterFlashing": true,
           "haltAfterReset": false
         },
         "coreConfigs": [

@@ -44,23 +44,23 @@ impl Ltdc<'_> {
 
         // Here comes HAL_DSI_ConfigPhyTimer() in the BSP example. We have already configured it at the beginning.
 
-        let ltdc_pc_polarity = Pcpol::RISINGEDGE; // LTDC_PCPOLARITY_IPC == 0
+        let ltdc_pc_polarity = Pcpol::RISING_EDGE; // LTDC_PCPOLARITY_IPC == 0
 
         let ltdc_de_polarity: Depol = if !dsi_config.de_polarity {
-            Depol::ACTIVELOW
+            Depol::ACTIVE_LOW
         } else {
-            Depol::ACTIVEHIGH
+            Depol::ACTIVE_HIGH
         };
         let ltdc_vs_polarity: Vspol = if !dsi_config.vs_polarity {
-            Vspol::ACTIVEHIGH
+            Vspol::ACTIVE_HIGH
         } else {
-            Vspol::ACTIVELOW
+            Vspol::ACTIVE_LOW
         };
 
         let ltdc_hs_polarity: Hspol = if !dsi_config.hs_polarity {
-            Hspol::ACTIVEHIGH
+            Hspol::ACTIVE_HIGH
         } else {
-            Hspol::ACTIVELOW
+            Hspol::ACTIVE_LOW
         };
 
         /* Timing Configuration */

@@ -11,6 +11,6 @@
         "--target",
         "thumbv7em-none-eabi",
         "--bin",
-        "pas-co2-stm32f469"
+        "pas_co2_stm32f469"
     ],
 }
