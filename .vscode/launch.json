@@ -20,7 +20,7 @@
           {
             "coreIndex": 0,
             //"programBinary": "${workspaceRoot}/target/thumbv7em-none-eabihf/debug/${workspaceFolderBasename}",
-            "programBinary": "${workspaceRoot}/target/thumbv7em-none-eabi/release/dsi_bsp_stm32f469",
+            "programBinary": "${workspaceRoot}/target/thumbv7em-none-eabi/release/pas_co2_stm32f469",
             "svdFile": "${workspaceRoot}/.vscode/stm32f469.svd",
           }
         ],
@@ -44,7 +44,7 @@
           {
             "coreIndex": 0,
             //"programBinary": "${workspaceRoot}/target/thumbv7em-none-eabihf/debug/${workspaceFolderBasename}",
-            "programBinary": "${workspaceRoot}/target/thumbv7em-none-eabi/release/dsi_bsp_stm32f469",
+            "programBinary": "${workspaceRoot}/target/thumbv7em-none-eabi/debug/pas_co2_stm32f469",
             "svdFile": "${workspaceRoot}/.vscode/stm32f469.svd",
           }
         ],

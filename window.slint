@@ -47,13 +47,16 @@ export component MainWindow inherits Window {
 
 
     co2text := Text {
+        x: 0px;
+        y: 80px;
+        width: 100%;
         wrap: TextWrap.no-wrap;
         horizontal-alignment: center;
-        y: 60px;
-        x: 0px;
-        width: 100%;
         text: co2_ppm;
-        font-size: 280px;
+        font-size: 255px; // 256px makes it crash in dubious ways -> https://github.com/slint-ui/slint/issues/7936
+        font-weight: 600;
+        letter-spacing: 15px;
+        //font-size: 280px;
         color: black;
     }
 
