@@ -47,23 +47,25 @@ export component MainWindow inherits Window {
 
 
     co2text := Text {
-        wrap: TextWrap.word-wrap;
-        //horizontal-alignment: center;
-        y: 110px;
+        wrap: TextWrap.no-wrap;
+        horizontal-alignment: center;
+        y: 60px;
+        x: 0px;
+        width: 100%;
         text: co2_ppm;
         font-size: 280px;
-        letter-spacing: 0px;
         color: black;
     }
 
     Text {
-        x: 60px;
+        x: 50px;
         y: 440px;
         horizontal-alignment: left;
         text: status_text;
-        font-size: 20px;
+        font-size: 15px;
     }
 
+    
     Text {
         x: 60px;
         y: 85px;
@@ -89,10 +91,10 @@ export component MainWindow inherits Window {
             root.start_measurement();
         }
         border := Rectangle {
-            width: 189px;
-            x: 51px;
-            y: 20px;
-            height: 50px;
+            width: 600px;
+            x: 20px;
+            y: 10px;
+            height: 70px;
             background: background_color;
             border-radius: root.height / 2;
         }
@@ -128,15 +130,16 @@ export component MainWindow inherits Window {
     }
 
     MyButton {
-        text: "FORCE COMP.";
+        text: "CAL";
         height: 71px;
-        x: 550px;
+        x: 680px;
         y: 15px;
 
         min-width: 0px;
-        width: 229px;
+        width: 100px;
 
         font-size: 20pt;
+
 
         clicked => {
             force_compensation();

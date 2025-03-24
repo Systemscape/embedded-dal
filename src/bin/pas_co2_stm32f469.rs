@@ -9,13 +9,14 @@ use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::{Executor, InterruptExecutor};
 use embassy_futures::select::select;
+use embassy_stm32::interrupt;
 use embassy_stm32::{
     bind_interrupts,
     exti::ExtiInput,
     gpio::{Level, Output, Pull, Speed},
     i2c::{self, I2c},
-    interrupt,
     interrupt::{InterruptExt, Priority},
+    ltdc::LtdcLayerConfig,
     mode::Async,
     peripherals::{self, QUADSPI},
     qspi::{
@@ -33,7 +34,7 @@ use embassy_stm32::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel, mutex::Mutex};
 use embassy_time::{Duration, Timer};
 use embedded_dal::{
-    backends::slint_embassy::Backend,
+    backends::{double_buffer_embassy::DoubleBuffer, slint_embassy::Backend},
     config::{Dimensions, Orientation},
     drivers::{
         dsi::{self, Dsi},
@@ -47,7 +48,10 @@ use pas_co2_rs::{
     regs::{MeasurementMode, OperatingMode},
     PasCo2,
 };
-use slint::{platform::software_renderer::MinimalSoftwareWindow, ComponentHandle, Weak};
+use slint::{
+    platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
+    ComponentHandle, Weak,
+};
 use static_cell::StaticCell;
 
 use defmt_rtt as _;
@@ -124,6 +128,7 @@ unsafe fn UART5() {
 bind_interrupts!(struct Irqs {
     I2C1_EV => i2c::EventInterruptHandler<peripherals::I2C1>;
     I2C1_ER => i2c::ErrorInterruptHandler<peripherals::I2C1>;
+    LTDC => embassy_stm32::ltdc::InterruptHandler<peripherals::LTDC>;
 });
 
 struct Stm32F469IDisco<'a> {
@@ -322,7 +327,7 @@ impl<'a> Stm32F469IDisco<'a> {
 
         let mut ltdc = ltdc::Ltdc::new(p.LTDC, &dsi_config);
 
-        let mut dsi = Dsi::new(p.DSIHOST, p.PJ2, &dsi_config);
+        let mut dsi: Dsi<'_> = Dsi::new(p.DSIHOST, p.PJ2, &dsi_config);
 
         dsi.enable();
 
@@ -409,7 +414,12 @@ fn main() -> ! {
     info!("Got touch screen diag: {:#?}", diag);
 
     info!("Init Backend...");
-    let sw_window = MinimalSoftwareWindow::new(Default::default());
+    let sw_window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    sw_window.set_size(slint::PhysicalSize::new(
+        LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
+        LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
+    ));
+
     slint::platform::set_platform(Box::new(Backend::new(
         sw_window.clone(),
         &mut board.qspi_flash,
@@ -527,7 +537,6 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
 
 #[embassy_executor::task]
 async fn slint_event_loop(
-    //async fn slint_event_loop(
     sw_window: Rc<MinimalSoftwareWindow>,
     mut scb: SCB,
     mut ltdc: Ltdc<'static>,
@@ -536,13 +545,16 @@ async fn slint_event_loop(
 ) -> ! {
     info!("Entering slint_event_loop");
 
-    let mut displayed_fb: &mut [TargetPixel] = fb1;
-    let mut work_fb: &mut [TargetPixel] = fb2;
+    let layer_config = LtdcLayerConfig {
+        pixel_format: embassy_stm32::ltdc::PixelFormat::ARGB8888, // 2 bytes per pixel
+        layer: embassy_stm32::ltdc::LtdcLayer::Layer1,
+        window_x0: 0,
+        window_x1: LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as _,
+        window_y0: 0,
+        window_y1: LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as _,
+    };
 
-    sw_window.set_size(slint::PhysicalSize::new(
-        LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as u32,
-        LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as u32,
-    ));
+    let mut double_buffer = DoubleBuffer::new(fb1, fb2, layer_config);
 
     let mut render_counter: u8 = 0;
 
@@ -555,8 +567,8 @@ async fn slint_event_loop(
         // Advance timers etc.
         slint::platform::update_timers_and_animations();
 
-        // Start rendering
-        sw_window.draw_if_needed(|renderer| {
+        // blocking render
+        let is_dirty = sw_window.draw_if_needed(|renderer| {
             // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black :/
             match render_counter {
                 0..=1 => render_counter += 1,
@@ -570,15 +582,22 @@ async fn slint_event_loop(
                 _ => (),
             }
 
-            debug!("start rendering...");
-            renderer.render(work_fb, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
-
-            scb.clean_dcache_by_slice(work_fb); // Unsure... DCache and Ethernet may cause issues.
-
-            ltdc.set_framebuffer(work_fb.as_ptr() as *const u32);
-
-            core::mem::swap::<&mut [_]>(&mut work_fb, &mut displayed_fb);
+            debug!("Drawing...");
+            let buffer = double_buffer.current();
+            renderer.render(buffer, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
         });
+
+        if is_dirty {
+            //let drawn_buf= double_buffer.current().as_ref();
+            // async transfer of frame buffer to lcd
+            debug!("Swapping buffers...");
+            double_buffer.swap(&mut ltdc.ltdc).await.unwrap();
+            debug!("DONE Swapping buffers!");
+
+            //scb.clean_dcache_by_slice(drawn_buf); // Unsure... DCache and Ethernet may cause issues.
+        } else {
+            Timer::after_millis(10).await
+        }
 
         // Try to put the MCU to sleep
         if !sw_window.has_active_animations() {

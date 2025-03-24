@@ -35,7 +35,7 @@ const fn pixel_format_to_size(pixel_format: Pf) -> u8 {
 }
 
 pub struct Ltdc<'a> {
-    _ltdc: embassy_stm32::ltdc::Ltdc<'a, LTDC>,
+    pub ltdc: embassy_stm32::ltdc::Ltdc<'a, LTDC>,
 }
 
 impl Ltdc<'_> {
@@ -138,7 +138,7 @@ impl Ltdc<'_> {
         ######################################
         */
 
-        Self { _ltdc: ltdc }
+        Self { ltdc }
     }
 
     pub fn config_layer(
