@@ -4,7 +4,6 @@
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
 use core::sync::atomic::AtomicI32;
-use cortex_m::peripheral::SCB;
 use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::{Executor, InterruptExecutor};
@@ -132,7 +131,6 @@ bind_interrupts!(struct Irqs {
 });
 
 struct Stm32F469IDisco<'a> {
-    pub scb: cortex_m::peripheral::SCB,
     pub ltdc: Ltdc<'a>,
     pub dsi: Dsi<'a>,
     pub qspi_flash: Qspi<'a, QUADSPI, Async>,
@@ -363,7 +361,6 @@ impl<'a> Stm32F469IDisco<'a> {
         );
 
         Self {
-            scb: cp.SCB,
             ltdc,
             dsi,
             qspi_flash,
@@ -504,7 +501,7 @@ fn main() -> ! {
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(slint_event_loop(
-            sw_window, board.scb, board.ltdc, board.fb1, board.fb2
+            sw_window, board.ltdc, board.fb1, board.fb2
         )));
     });
 }
@@ -538,7 +535,6 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
 #[embassy_executor::task]
 async fn slint_event_loop(
     sw_window: Rc<MinimalSoftwareWindow>,
-    mut scb: SCB,
     mut ltdc: Ltdc<'static>,
     fb1: &'static mut [ARGB8888],
     fb2: &'static mut [ARGB8888],
@@ -715,8 +711,8 @@ async fn measure_co2(
         info!("Entering measure_co2 loop");
         match TRIGGER_START_MEASUREMENT.receive().await {
             Co2SensorCommand::ForceCalibration(val) => {
-                window.set_in_progress("Forcing Calibration!".to_owned().into());
-                window.set_background_color(slint::Color::from_rgb_u8(0, 0, 255));
+                window.set_in_progress("Calibration in progress!".to_owned().into());
+                window.set_ampel_value(Ampel::Calibration);
 
                 // Make it render the changed text and color...
                 TRIGGER_RENDERER.send(None).await;
@@ -791,11 +787,11 @@ async fn measure_co2(
                 window.set_co2_ppm(co2_ppm.into());
 
                 let color = match co2_ppm {
-                    0..=700 => slint::Color::from_rgb_u8(0, 200, 0),
-                    701..=1200 => slint::Color::from_rgb_u8(255, 165, 0),
-                    _ => slint::Color::from_rgb_u8(255, 0, 0),
+                    0..=700 => Ampel::Green,
+                    701..=1200 => Ampel::Yellow,
+                    _ => Ampel::Red,
                 };
-                window.set_background_color(color);
+                window.set_ampel_value(color);
 
                 // Make it render the changed text.
                 TRIGGER_RENDERER.sender().send(None).await;

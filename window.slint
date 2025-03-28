@@ -4,7 +4,7 @@ import { Button } from "std-widgets.slint";
 component MyButton inherits Rectangle {
     in-out property text <=> txt.text;
     in-out property font-size <=> txt.font-size;
-    in property<length> button-height: txt.preferred-height * 1.6;
+    in property <length> button-height: txt.preferred-height * 1.6;
     callback clicked <=> touch.clicked;
 
     border-radius: root.height / 2;
@@ -24,6 +24,7 @@ component MyButton inherits Rectangle {
     touch := TouchArea { }
 }
 
+export enum Ampel { unknown, calibration, green, yellow, red}
 
 export component MainWindow inherits Window {
     default-font-size: 30pt;
@@ -32,10 +33,16 @@ export component MainWindow inherits Window {
     min-width: 800px;
     min-height: 480px;
     background: white;
+    property <length> ampel_offset: 45px;
+    property <length> ampel_spacing: 20px;
+    property <length> ampel_diameter: 70px;
+    property <length> ampel_border_margin: 10px;
+    property <float> ampel_alpha: 0.15;
+
     property <bool> state: false;
 
-    in property <int> co2_ppm: 9999;
-    in property <color> background_color: gray;
+    in property <int> co2_ppm: 3333;
+    in property <Ampel> ampel_value: Ampel.unknown;
     in property <string> status_text: "Status...";
     in property <string> in_progress: "";
     in property <int> time_since_last: 0;
@@ -45,11 +52,10 @@ export component MainWindow inherits Window {
     callback brightness_decrease();
     callback force_compensation();
 
-
     co2text := Text {
-        x: 0px;
+        x: 100px;
         y: 80px;
-        width: 100%;
+        width: parent.width - self.x;
         wrap: TextWrap.no-wrap;
         horizontal-alignment: center;
         text: co2_ppm;
@@ -68,10 +74,9 @@ export component MainWindow inherits Window {
         font-size: 15px;
     }
 
-    
     Text {
-        x: 60px;
-        y: 85px;
+        x: 140px;
+        y: 15px;
         horizontal-alignment: left;
         text: "Letzte Messung: " + time_since_last + " s";
         font-size: 20px;
@@ -93,13 +98,81 @@ export component MainWindow inherits Window {
             debug("start_measurement()");
             root.start_measurement();
         }
-        border := Rectangle {
-            width: 600px;
-            x: 20px;
-            y: 10px;
-            height: 70px;
-            background: background_color;
-            border-radius: root.height / 2;
+
+        Rectangle {
+            x: 30px - ampel_border_margin;
+            y: ampel_offset + ampel_diameter + ampel_spacing - ampel_border_margin;
+
+            width: ampel_diameter + 2 * ampel_border_margin;
+            height: 3 * ampel_diameter + 2 * ampel_spacing + 2 * ampel_border_margin;
+            border-radius: root.width / 2;
+            border-width: 2px;
+            border-color: gray;
+        }
+
+        if ampel_value == Ampel.unknown: Rectangle {
+            x: 30px;
+            y: ampel_offset;
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: gray;
+        }
+        if ampel_value == Ampel.calibration: Rectangle {
+            x: 30px;
+            y: ampel_offset;
+
+            text := Text {
+                text: "CAL";
+                font-weight: 900;
+                font-size: 20px;
+                color: black;
+                animate color {
+                    duration: 2000ms;
+                    direction: alternate;
+                    iteration-count: -1;
+                }
+            }
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: blue.with-alpha(0.7);
+            animate background {
+                duration: 2000ms;
+                direction: alternate;
+                iteration-count: -1;
+            }
+        }
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + ampel_diameter + ampel_spacing;
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.red ? red : red.with-alpha(ampel_alpha);
+        }
+
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + 2 * (ampel_diameter + ampel_spacing);
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.yellow ? yellow : yellow.with-alpha(ampel_alpha);
+        }
+
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + 3 * (ampel_diameter + ampel_spacing);
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.green ? green : green.with-alpha(ampel_alpha);
         }
     }
 
@@ -109,25 +182,26 @@ export component MainWindow inherits Window {
         spacing: 20px;
         y: 400px;
         x: 560px;
-        MyButton {
-            text: "+";
-            font-size: 20pt;
-            button-height: 60px;
-            width: 100px;
-            clicked => {
-                brightness_increase();
-                debug("brightness_increase()");
-            }
-        }
 
         MyButton {
-            text: "–";
-            font-size: 20pt;
+            text: "☀";
+            font-size: 16pt;
             button-height: 60px;
             width: 100px;
             clicked => {
                 brightness_decrease();
                 debug("brightness_decrease()");
+            }
+        }
+
+        MyButton {
+            text: "☀";
+            font-size: 27pt;
+            button-height: 60px;
+            width: 100px;
+            clicked => {
+                brightness_increase();
+                debug("brightness_increase()");
             }
         }
     }
@@ -142,7 +216,6 @@ export component MainWindow inherits Window {
         width: 100px;
 
         font-size: 20pt;
-
 
         clicked => {
             force_compensation();
