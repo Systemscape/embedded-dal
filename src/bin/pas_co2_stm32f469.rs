@@ -47,6 +47,7 @@ use pas_co2_rs::{
     regs::{MeasurementMode, OperatingMode},
     PasCo2,
 };
+use slint::platform::software_renderer::RenderingRotation;
 use slint::{
     platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
     ComponentHandle, Weak,
@@ -73,7 +74,9 @@ static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 static ALLOCATOR: Heap = Heap::empty();
 
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
-static SCREEN_BRIGHTNESS_SIGNAL: Channel<CriticalSectionRawMutex, ScreenBrightnessCommand, 20> =
+static SCREEN_CONTROL_SIGNAL: Channel<CriticalSectionRawMutex, ScreenControlCommand, 20> =
+    Channel::new();
+static RENDERER_CONTROL_SIGNAL: Channel<CriticalSectionRawMutex, RendererControlCommand, 20> =
     Channel::new();
 static TRIGGER_START_MEASUREMENT: Channel<CriticalSectionRawMutex, Co2SensorCommand, 2> =
     Channel::new();
@@ -105,9 +108,13 @@ enum Co2SensorCommand {
     ForceCalibration(i16),
 }
 
-enum ScreenBrightnessCommand {
-    Increase,
-    Decrease,
+enum ScreenControlCommand {
+    BrightnessIncrease,
+    BrightnessDecrease,
+}
+
+enum RendererControlCommand {
+    Rotate,
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -438,12 +445,17 @@ fn main() -> ! {
 
     window.on_brightness_increase(move || {
         error!("on_brightness_increase");
-        let _ = SCREEN_BRIGHTNESS_SIGNAL.try_send(ScreenBrightnessCommand::Increase);
+        let _ = SCREEN_CONTROL_SIGNAL.try_send(ScreenControlCommand::BrightnessIncrease);
     });
 
     window.on_brightness_decrease(move || {
         error!("on_brightness_decrease");
-        let _ = SCREEN_BRIGHTNESS_SIGNAL.try_send(ScreenBrightnessCommand::Decrease);
+        let _ = SCREEN_CONTROL_SIGNAL.try_send(ScreenControlCommand::BrightnessDecrease);
+    });
+
+    window.on_rotate_screen(move || {
+        error!("on_rotate_screen");
+        let _ = RENDERER_CONTROL_SIGNAL.try_send(RendererControlCommand::Rotate);
     });
 
     let window_weak = window.as_weak();
@@ -514,11 +526,11 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
 
     // Increase or decrease screen brightness whenever the signal is received. But make sure it stays in the range [10, 250].
     loop {
-        match SCREEN_BRIGHTNESS_SIGNAL.receive().await {
-            ScreenBrightnessCommand::Increase => {
+        match SCREEN_CONTROL_SIGNAL.receive().await {
+            ScreenControlCommand::BrightnessIncrease => {
                 screen_brightness = screen_brightness.checked_add(10).unwrap_or(250)
             }
-            ScreenBrightnessCommand::Decrease => {
+            ScreenControlCommand::BrightnessDecrease => {
                 screen_brightness = screen_brightness.checked_sub(10).unwrap_or(10)
             }
         }
@@ -565,7 +577,20 @@ async fn slint_event_loop(
 
         // blocking render
         let is_dirty = sw_window.draw_if_needed(|renderer| {
-            // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black :/
+
+            // Rotate the screen if it has been requested
+            if let Ok(RendererControlCommand::Rotate) = RENDERER_CONTROL_SIGNAL.try_receive() {
+                match renderer.rendering_rotation() {
+                    RenderingRotation::NoRotation => renderer.set_rendering_rotation(
+                        slint::platform::software_renderer::RenderingRotation::Rotate180,
+                    ),
+                    _ => renderer.set_rendering_rotation(
+                        slint::platform::software_renderer::RenderingRotation::NoRotation,
+                    ),
+                }
+            }
+
+            // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black or has artifacts :/
             match render_counter {
                 0..=1 => render_counter += 1,
                 2 => {
@@ -590,7 +615,6 @@ async fn slint_event_loop(
             double_buffer.swap(&mut ltdc.ltdc).await.unwrap();
             debug!("DONE Swapping buffers!");
 
-            //scb.clean_dcache_by_slice(drawn_buf); // Unsure... DCache and Ethernet may cause issues.
         } else {
             Timer::after_millis(10).await
         }

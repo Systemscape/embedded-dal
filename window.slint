@@ -4,7 +4,7 @@ import { Button } from "std-widgets.slint";
 component MyButton inherits Rectangle {
     in-out property text <=> txt.text;
     in-out property font-size <=> txt.font-size;
-    in property <length> button-height: txt.preferred-height * 1.6;
+    in property <length> button-height: 70px;
     callback clicked <=> touch.clicked;
 
     border-radius: root.height / 2;
@@ -38,6 +38,7 @@ export component MainWindow inherits Window {
     property <length> ampel_diameter: 70px;
     property <length> ampel_border_margin: 10px;
     property <float> ampel_alpha: 0.15;
+    property <length> padding-outer: 20px;
 
     property <bool> state: false;
 
@@ -50,6 +51,7 @@ export component MainWindow inherits Window {
     callback start_measurement();
     callback brightness_increase();
     callback brightness_decrease();
+    callback rotate_screen();
     callback force_compensation();
 
     co2text := Text {
@@ -67,8 +69,8 @@ export component MainWindow inherits Window {
     }
 
     Text {
-        x: 50px;
-        y: 440px;
+        x: padding-outer;
+        y: root.height - padding-outer;
         horizontal-alignment: left;
         text: status_text;
         font-size: 15px;
@@ -178,15 +180,25 @@ export component MainWindow inherits Window {
 
     HorizontalLayout {
         height: 60px;
-        width: 150px;
         spacing: 20px;
+        padding-right: padding-outer;
         y: 400px;
-        x: 560px;
+
+        alignment: end;
+
+        MyButton {
+            text: "↺";
+            font-size: 30pt;
+            width: 100px;
+            clicked => {
+                rotate_screen();
+                debug("rotate_screen()");
+            }
+        }
 
         MyButton {
             text: "☀";
             font-size: 16pt;
-            button-height: 60px;
             width: 100px;
             clicked => {
                 brightness_decrease();
@@ -197,7 +209,6 @@ export component MainWindow inherits Window {
         MyButton {
             text: "☀";
             font-size: 27pt;
-            button-height: 60px;
             width: 100px;
             clicked => {
                 brightness_increase();
@@ -208,12 +219,11 @@ export component MainWindow inherits Window {
 
     MyButton {
         text: "CAL";
-        height: 71px;
-        x: 680px;
+        x: root.width - self.width - padding-outer;
         y: 15px;
 
         min-width: 0px;
-        width: 100px;
+        width: 90px;
 
         font-size: 20pt;
 
@@ -222,4 +232,5 @@ export component MainWindow inherits Window {
             debug("force_compensation()");
         }
     }
+
 }
