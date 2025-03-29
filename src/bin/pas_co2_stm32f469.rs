@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use alloc::{borrow::ToOwned, boxed::Box, rc::Rc};
-use core::sync::atomic::AtomicI32;
+use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use defmt::*;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
 use embassy_executor::{Executor, InterruptExecutor};
@@ -76,8 +76,9 @@ static ALLOCATOR: Heap = Heap::empty();
 static TIME_LAST: AtomicI32 = AtomicI32::new(-1);
 static SCREEN_CONTROL_SIGNAL: Channel<CriticalSectionRawMutex, ScreenControlCommand, 20> =
     Channel::new();
-static RENDERER_CONTROL_SIGNAL: Channel<CriticalSectionRawMutex, RendererControlCommand, 20> =
-    Channel::new();
+
+static ROTATE_SCREEN: AtomicBool = AtomicBool::new(false);
+
 static TRIGGER_START_MEASUREMENT: Channel<CriticalSectionRawMutex, Co2SensorCommand, 2> =
     Channel::new();
 static TRIGGER_RENDERER: Channel<
@@ -111,10 +112,6 @@ enum Co2SensorCommand {
 enum ScreenControlCommand {
     BrightnessIncrease,
     BrightnessDecrease,
-}
-
-enum RendererControlCommand {
-    Rotate,
 }
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -455,7 +452,7 @@ fn main() -> ! {
 
     window.on_rotate_screen(move || {
         error!("on_rotate_screen");
-        let _ = RENDERER_CONTROL_SIGNAL.try_send(RendererControlCommand::Rotate);
+        ROTATE_SCREEN.fetch_not(core::sync::atomic::Ordering::SeqCst);
     });
 
     let window_weak = window.as_weak();
@@ -577,17 +574,29 @@ async fn slint_event_loop(
 
         // blocking render
         let is_dirty = sw_window.draw_if_needed(|renderer| {
-
             // Rotate the screen if it has been requested
-            if let Ok(RendererControlCommand::Rotate) = RENDERER_CONTROL_SIGNAL.try_receive() {
-                match renderer.rendering_rotation() {
-                    RenderingRotation::NoRotation => renderer.set_rendering_rotation(
-                        slint::platform::software_renderer::RenderingRotation::Rotate180,
-                    ),
-                    _ => renderer.set_rendering_rotation(
-                        slint::platform::software_renderer::RenderingRotation::NoRotation,
-                    ),
-                }
+            if ROTATE_SCREEN.load(Ordering::SeqCst)
+                && renderer.rendering_rotation() == RenderingRotation::NoRotation
+            {
+                renderer.set_rendering_rotation(
+                    slint::platform::software_renderer::RenderingRotation::Rotate180,
+                );
+                sw_window.request_redraw();
+                renderer.set_repaint_buffer_type(
+                    slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+                );
+                render_counter = 0;
+            } else if !ROTATE_SCREEN.load(core::sync::atomic::Ordering::SeqCst)
+                && renderer.rendering_rotation() == RenderingRotation::Rotate180
+            {
+                renderer.set_rendering_rotation(
+                    slint::platform::software_renderer::RenderingRotation::NoRotation,
+                );
+                sw_window.request_redraw();
+                renderer.set_repaint_buffer_type(
+                    slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+                );
+                render_counter = 0;
             }
 
             // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black or has artifacts :/
@@ -614,7 +623,6 @@ async fn slint_event_loop(
             debug!("Swapping buffers...");
             double_buffer.swap(&mut ltdc.ltdc).await.unwrap();
             debug!("DONE Swapping buffers!");
-
         } else {
             Timer::after_millis(10).await
         }
@@ -661,9 +669,20 @@ async fn read_touch_screen(
             .flatten()
         {
             Some(state) => {
+                // If the screen is rotated, we need to map the x and y positions
+                let x = if !ROTATE_SCREEN.load(Ordering::SeqCst) {
+                    state.x as i32
+                } else {
+                    LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as i32 - state.x as i32
+                };
+                let y = if !ROTATE_SCREEN.load(Ordering::SeqCst) {
+                    state.y as i32
+                } else {
+                    LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as i32 - state.y as i32
+                };
+
                 let position: slint::LogicalPosition =
-                    slint::PhysicalPosition::new(state.x as i32, state.y as i32)
-                        .to_logical(window_scale_factor);
+                    slint::PhysicalPosition::new(x, y).to_logical(window_scale_factor);
 
                 trace!("Got Touch: {:#?}", state);
                 Some(match last_touch.replace(position) {

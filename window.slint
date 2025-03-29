@@ -4,7 +4,7 @@ import { Button } from "std-widgets.slint";
 component MyButton inherits Rectangle {
     in-out property text <=> txt.text;
     in-out property font-size <=> txt.font-size;
-    in property <length> button-height: 70px;
+    in property <length> button-height: 80px;
     callback clicked <=> touch.clicked;
 
     border-radius: root.height / 2;
@@ -33,7 +33,7 @@ export component MainWindow inherits Window {
     min-width: 800px;
     min-height: 480px;
     background: white;
-    property <length> ampel_offset: 45px;
+    property <length> ampel_offset: 25px;
     property <length> ampel_spacing: 20px;
     property <length> ampel_diameter: 70px;
     property <length> ampel_border_margin: 10px;
@@ -56,7 +56,7 @@ export component MainWindow inherits Window {
 
     co2text := Text {
         x: 100px;
-        y: 80px;
+        y: 60px;
         width: parent.width - self.x;
         wrap: TextWrap.no-wrap;
         horizontal-alignment: center;
@@ -182,13 +182,13 @@ export component MainWindow inherits Window {
         height: 60px;
         spacing: 20px;
         padding-right: padding-outer;
-        y: 400px;
+        y: 380px;
 
         alignment: end;
 
         MyButton {
             text: "↺";
-            font-size: 30pt;
+            font-size: 40px;
             width: 100px;
             clicked => {
                 rotate_screen();
@@ -198,7 +198,7 @@ export component MainWindow inherits Window {
 
         MyButton {
             text: "☀";
-            font-size: 16pt;
+            font-size: 20px;
             width: 100px;
             clicked => {
                 brightness_decrease();
@@ -207,8 +207,8 @@ export component MainWindow inherits Window {
         }
 
         MyButton {
-            text: "☀";
-            font-size: 27pt;
+            text: "☀☀";
+            font-size: 35px;
             width: 100px;
             clicked => {
                 brightness_increase();
