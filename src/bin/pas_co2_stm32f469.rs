@@ -544,8 +544,8 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
 }
 
 /// Eventloop implementation
-/// 
-/// 
+///
+/// Handles rendering into the `fb1`/`fb2` doublebuffer and manages events sent via `TRIGGER_RENDERER`
 #[embassy_executor::task]
 async fn slint_event_loop(
     sw_window: Rc<MinimalSoftwareWindow>,
@@ -555,17 +555,21 @@ async fn slint_event_loop(
 ) -> ! {
     info!("Entering slint_event_loop");
 
-    let layer_config = LtdcLayerConfig {
-        pixel_format: embassy_stm32::ltdc::PixelFormat::ARGB8888, // 2 bytes per pixel
-        layer: embassy_stm32::ltdc::LtdcLayer::Layer1,
-        window_x0: 0,
-        window_x1: LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as _,
-        window_y0: 0,
-        window_y1: LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as _,
-    };
+    let mut double_buffer = DoubleBuffer::new(
+        fb1,
+        fb2,
+        LtdcLayerConfig {
+            pixel_format: embassy_stm32::ltdc::PixelFormat::ARGB8888, // 2 bytes per pixel
+            layer: embassy_stm32::ltdc::LtdcLayer::Layer1,
+            window_x0: 0,
+            window_x1: LCD_DIMENSIONS.get_width(LCD_ORIENTATION) as _,
+            window_y0: 0,
+            window_y1: LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as _,
+        },
+    );
 
-    let mut double_buffer = DoubleBuffer::new(fb1, fb2, layer_config);
-
+    // On first render or when rotating the screen, we have to render into the `NewBuffer` two times to avoid artifacts
+    // caused by some unknown error with the `SwappedBuffers`
     let mut render_counter: u8 = 0;
 
     loop {
@@ -577,36 +581,34 @@ async fn slint_event_loop(
         // Advance timers etc.
         slint::platform::update_timers_and_animations();
 
-        // blocking render
+        // Blocking render
         let is_dirty = sw_window.draw_if_needed(|renderer| {
-            // Rotate the screen if it has been requested
-            if ROTATE_SCREEN.load(Ordering::SeqCst)
-                && renderer.rendering_rotation() == RenderingRotation::NoRotation
-            {
-                renderer.set_rendering_rotation(
-                    slint::platform::software_renderer::RenderingRotation::Rotate180,
-                );
+            let rotate_screen = ROTATE_SCREEN.load(Ordering::SeqCst);
+
+            // Rotate the screen if the current rotation does not match the selected one
+            if rotate_screen && renderer.rendering_rotation() == RenderingRotation::NoRotation {
+                renderer.set_rendering_rotation(RenderingRotation::Rotate180);
                 sw_window.request_redraw();
-                renderer.set_repaint_buffer_type(
-                    slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-                );
                 render_counter = 0;
-            } else if !ROTATE_SCREEN.load(core::sync::atomic::Ordering::SeqCst)
+            } else if !rotate_screen
                 && renderer.rendering_rotation() == RenderingRotation::Rotate180
             {
-                renderer.set_rendering_rotation(
-                    slint::platform::software_renderer::RenderingRotation::NoRotation,
-                );
+                renderer.set_rendering_rotation(RenderingRotation::NoRotation);
                 sw_window.request_redraw();
-                renderer.set_repaint_buffer_type(
-                    slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-                );
                 render_counter = 0;
             }
 
             // Only use SwappedBuffers after 2 rendering cycles. Otherwise screen stays black or has artifacts :/
             match render_counter {
-                0..=1 => render_counter += 1,
+                0 => {
+                    renderer.set_repaint_buffer_type(
+                        slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+                    );
+                    render_counter += 1;
+                }
+                1 => {
+                    render_counter += 1;
+                }
                 2 => {
                     info!("Setting to SwappedBuffers");
                     renderer.set_repaint_buffer_type(
@@ -622,14 +624,11 @@ async fn slint_event_loop(
             renderer.render(buffer, LCD_DIMENSIONS.get_width(LCD_ORIENTATION).into());
         });
 
+        // Only swap buffers if something was drawn
         if is_dirty {
-            //let drawn_buf= double_buffer.current().as_ref();
-            // async transfer of frame buffer to lcd
             debug!("Swapping buffers...");
             double_buffer.swap(&mut ltdc.ltdc).await.unwrap();
             debug!("DONE Swapping buffers!");
-        } else {
-            Timer::after_millis(10).await
         }
 
         // Try to put the MCU to sleep
@@ -650,6 +649,7 @@ async fn slint_event_loop(
     }
 }
 
+/// Read the touchscreen via I2C and send events to the slint eventloop
 #[embassy_executor::task]
 async fn read_touch_screen(
     mut touch_screen: Ft6x36<I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>>,
@@ -661,11 +661,14 @@ async fn read_touch_screen(
 
     loop {
         debug!("read_touch_screen loop begin");
+
         // Remember the current exti pin state. In case it changes during read or rendering.
         let exti_pin_high = exti.is_high();
 
-        // handle touch event
+        // Mousebutton we send as a click (i.e., match touch to left-click)
         let button = slint::platform::PointerEventButton::Left;
+
+        // Handle touch event
         let event = match touch_screen
             .get_touch_event()
             .await
@@ -686,8 +689,7 @@ async fn read_touch_screen(
                     LCD_DIMENSIONS.get_height(LCD_ORIENTATION) as i32 - state.y as i32
                 };
 
-                let position: slint::LogicalPosition =
-                    slint::PhysicalPosition::new(x, y).to_logical(window_scale_factor);
+                let position = slint::PhysicalPosition::new(x, y).to_logical(window_scale_factor);
 
                 trace!("Got Touch: {:#?}", state);
                 Some(match last_touch.replace(position) {
@@ -695,6 +697,7 @@ async fn read_touch_screen(
                     None => slint::platform::WindowEvent::PointerPressed { position, button },
                 })
             }
+            // When to touch is registered, update last_touch and send the PointerReleased event
             None => last_touch
                 .take()
                 .map(|position| slint::platform::WindowEvent::PointerReleased { position, button }),
@@ -702,11 +705,13 @@ async fn read_touch_screen(
 
         // Send the event to eventloop
         if let Some(event) = event {
+            // Store flag before dispatching the event
             let is_pointer_release_event =
                 matches!(event, slint::platform::WindowEvent::PointerReleased { .. });
+
             TRIGGER_RENDERER.send(Some(event)).await;
 
-            // removes hover state on widgets
+            // Remove hover state on widgets by sending PointerExited event, as well.
             if is_pointer_release_event {
                 // Trigger the rendering loop
                 TRIGGER_RENDERER
@@ -718,7 +723,7 @@ async fn read_touch_screen(
 
         debug!("read_touch_screen loop end. Waiting for exti with timeout...");
 
-        // Drop result. In case of an error (i.e., timeout), we just continue the loop.
+        // Drop Result<>, in case of an error (i.e., timeout), we just continue the loop.
         let _ = embassy_time::with_timeout(Duration::from_secs(1), async {
             if exti_pin_high {
                 exti.wait_for_low().await;
@@ -730,6 +735,7 @@ async fn read_touch_screen(
     }
 }
 
+/// Task that performs CO2 measurements via I2C
 #[embassy_executor::task]
 async fn measure_co2(
     i2c: I2cDevice<'static, CriticalSectionRawMutex, I2c<'static, Async>>,
@@ -739,11 +745,12 @@ async fn measure_co2(
 
     let window = unwrap!(window_weak.upgrade());
 
+    // Setup and configure the sensor
     let mut pas_co2 = PasCo2::new(i2c);
 
     info!("CO2 Sensor Status: {}", unwrap!(pas_co2.get_status().await));
 
-    let mode = MeasurementMode {
+    let mode: MeasurementMode = MeasurementMode {
         operating_mode: OperatingMode::Idle,
         ..Default::default()
     };
@@ -883,6 +890,7 @@ fn get_board_config() -> embassy_stm32::Config {
 
 slint::include_modules!();
 
+/// Custom exception handler that triggers a system reset after a delay
 #[cortex_m_rt::exception]
 unsafe fn HardFault(_ef: &cortex_m_rt::ExceptionFrame) -> ! {
     cortex_m::asm::delay(500_000_000);
