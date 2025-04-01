@@ -1,9 +1,4 @@
-import { Button } from "std-widgets.slint";
-
-
 component MyButton inherits Rectangle {
-    in-out property text <=> txt.text;
-    in-out property font-size <=> txt.font-size;
     in property <length> button-height: 80px;
     callback clicked <=> touch.clicked;
 
@@ -13,13 +8,8 @@ component MyButton inherits Rectangle {
     background: touch.pressed ? #6b8282 : touch.has-hover ? #6c616c : lightgray;
 
     height: button-height;
-    min-width: txt.preferred-width + 20px;
 
-    txt := Text {
-        x: (parent.width - self.width) / 2 + (touch.pressed ? 2px : 0);
-        y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0);
-        color: touch.pressed ? darkgray : black;
-    }
+    @children
 
     touch := TouchArea { }
 }
@@ -27,8 +17,6 @@ component MyButton inherits Rectangle {
 export enum Ampel { unknown, calibration, green, yellow, red}
 
 export component MainWindow inherits Window {
-    default-font-size: 30pt;
-
     title: "CO2 Monitor";
     min-width: 800px;
     min-height: 480px;
@@ -40,10 +28,9 @@ export component MainWindow inherits Window {
     property <float> ampel_alpha: 0.15;
     property <length> padding-outer: 20px;
 
-    property <bool> state: false;
+    in property <Ampel> ampel_value: Ampel.unknown;
 
     in property <int> co2_ppm: 3333;
-    in property <Ampel> ampel_value: Ampel.unknown;
     in property <string> status_text: "Status...";
     in property <string> in_progress: "";
     in property <int> time_since_last: 0;
@@ -56,16 +43,22 @@ export component MainWindow inherits Window {
 
     co2text := Text {
         x: 100px;
-        y: 60px;
+        y: 45px;
         width: parent.width - self.x;
         wrap: TextWrap.no-wrap;
         horizontal-alignment: center;
         text: co2_ppm;
-        font-size: 255px; // 256px makes it crash in dubious ways -> https://github.com/slint-ui/slint/issues/7936
-        font-weight: 600;
-        letter-spacing: 15px;
-        //font-size: 280px;
+        font-size: 270px; // 256px makes it crash in dubious ways with 1.10 -> https://github.com/slint-ui/slint/issues/7936
+        //letter-spacing: 10px;
         color: black;
+    }
+
+    Text {
+        x: padding-outer;
+        y: 425px;
+        horizontal-alignment: left;
+        text: "Letzte Messung: " + time_since_last + " s";
+        font-size: 20px;
     }
 
     Text {
@@ -76,13 +69,35 @@ export component MainWindow inherits Window {
         font-size: 15px;
     }
 
-    Text {
-        x: 140px;
-        y: 15px;
-        horizontal-alignment: left;
-        text: "Letzte Messung: " + time_since_last + " s";
-        font-size: 20px;
+    Image {
+        horizontal-alignment: center;
+        y: 5px;
+        height: 90px;
+        source: @image-url("./Systemscape_Logo.png");
     }
+
+    MyButton {
+        x: root.width - self.width - padding-outer;
+        y: 15px;
+
+        min-width: 0px;
+        width: 90px;
+
+        clicked => {
+            force_compensation();
+            debug("force_compensation()");
+        }
+
+        Text {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            color: black;
+
+            text: "Cal";
+            font-size: 30px;
+        }
+    }
+
 
     // Currently unused. This won't render when set inside the measure_co2 function.
     in_progress_text := Text {
@@ -114,7 +129,7 @@ export component MainWindow inherits Window {
 
         if ampel_value == Ampel.unknown: Rectangle {
             x: 30px;
-            y: ampel_offset;
+            y: root.ampel_offset;
 
             width: ampel_diameter;
             height: ampel_diameter;
@@ -164,7 +179,7 @@ export component MainWindow inherits Window {
             width: ampel_diameter;
             height: ampel_diameter;
             border-radius: root.width / 2;
-            background: ampel_value == Ampel.yellow ? yellow : yellow.with-alpha(ampel_alpha);
+            background: ampel_value == Ampel.yellow ? orange : orange.with-alpha(ampel_alpha);
         }
 
         Rectangle {
@@ -182,54 +197,59 @@ export component MainWindow inherits Window {
         height: 60px;
         spacing: 20px;
         padding-right: padding-outer;
-        y: 380px;
+        y: 390px;
 
         alignment: end;
 
         MyButton {
-            text: "↺";
-            font-size: 40px;
             width: 100px;
+            
             clicked => {
                 rotate_screen();
                 debug("rotate_screen()");
             }
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "↺";
+                font-size: 70px;
+            }
         }
 
         MyButton {
-            text: "☀";
-            font-size: 20px;
             width: 100px;
+            
             clicked => {
                 brightness_decrease();
                 debug("brightness_decrease()");
             }
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "☼";
+                font-size: 40px;
+            }
         }
 
         MyButton {
-            text: "☀☀";
-            font-size: 35px;
             width: 100px;
+            
             clicked => {
                 brightness_increase();
                 debug("brightness_increase()");
             }
-        }
-    }
 
-    MyButton {
-        text: "CAL";
-        x: root.width - self.width - padding-outer;
-        y: 15px;
-
-        min-width: 0px;
-        width: 90px;
-
-        font-size: 20pt;
-
-        clicked => {
-            force_compensation();
-            debug("force_compensation()");
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "☼";
+                font-size: 70px;
+            }
         }
     }
 

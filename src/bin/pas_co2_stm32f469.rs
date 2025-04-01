@@ -436,22 +436,22 @@ fn main() -> ! {
     });
 
     window.on_force_compensation(move || {
-        error!("on_force_compensation");
+        debug!("on_force_compensation");
         let _ = TRIGGER_START_MEASUREMENT.try_send(Co2SensorCommand::ForceCalibration(450));
     });
 
     window.on_brightness_increase(move || {
-        error!("on_brightness_increase");
+        debug!("on_brightness_increase");
         let _ = SCREEN_CONTROL_SIGNAL.try_send(ScreenControlCommand::BrightnessIncrease);
     });
 
     window.on_brightness_decrease(move || {
-        error!("on_brightness_decrease");
+        debug!("on_brightness_decrease");
         let _ = SCREEN_CONTROL_SIGNAL.try_send(ScreenControlCommand::BrightnessDecrease);
     });
 
     window.on_rotate_screen(move || {
-        error!("on_rotate_screen");
+        debug!("on_rotate_screen");
         ROTATE_SCREEN.fetch_not(core::sync::atomic::Ordering::SeqCst);
     });
 
@@ -515,6 +515,8 @@ fn main() -> ! {
     });
 }
 
+/// Task that mostly controls screen brightness, because that is a DSI feature:
+/// we need to send commands to the display controller directly
 #[embassy_executor::task]
 async fn manage_dsi(mut dsi: Dsi<'static>) {
     let mut screen_brightness: u8 = 100;
@@ -541,6 +543,9 @@ async fn manage_dsi(mut dsi: Dsi<'static>) {
     }
 }
 
+/// Eventloop implementation
+/// 
+/// 
 #[embassy_executor::task]
 async fn slint_event_loop(
     sw_window: Rc<MinimalSoftwareWindow>,
@@ -754,7 +759,7 @@ async fn measure_co2(
         info!("Entering measure_co2 loop");
         match TRIGGER_START_MEASUREMENT.receive().await {
             Co2SensorCommand::ForceCalibration(val) => {
-                window.set_in_progress("Calibration in progress!".to_owned().into());
+                window.set_in_progress("Calibrating to 450ppm... ".to_owned().into());
                 window.set_ampel_value(Ampel::Calibration);
 
                 // Make it render the changed text and color...

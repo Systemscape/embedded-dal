@@ -1,6 +1,7 @@
+// Adapted from: https://github.com/slint-ui/slint/blob/4e6c0a9df70e52618ba482793517a022cdd87d13/examples/mcu-embassy/src/mcu/double_buffer.rs
+// Original license:
 // Copyright © 2025 David Haig
 // SPDX-License-Identifier: MIT
-// Source: https://github.com/slint-ui/slint/blob/4e6c0a9df70e52618ba482793517a022cdd87d13/examples/mcu-embassy/src/mcu/double_buffer.rs
 
 use embassy_stm32::ltdc::{self, Ltdc, LtdcLayerConfig};
 use slint::platform::software_renderer::TargetPixel;

@@ -110,3 +110,5 @@ embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "40
 embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
 embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+#slint = { git = "https://github.com/slint-ui/slint.git", rev = "f930e363d1122257b7981e2a719014da4279cc43" }
+#slint-build = { git = "https://github.com/slint-ui/slint.git", rev = "f930e363d1122257b7981e2a719014da4279cc43" }
