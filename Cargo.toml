@@ -1,14 +1,116 @@
 [package]
-name = "embedded-dal"
-version = "0.0.0"
-edition = "2021"
-authors = ["Joel Schulz-Andres <joel@systemscape.de>", "Julian Dickert <julian@systemscape.de>"]
+authors = [
+    "Joel Schulz-Andres <joel@systemscape.de>",
+    "Julian Dickert <julian@systemscape.de>",
+]
+categories = ["embedded", "no-std", "visualization"]
 description = "A display abstraction layer for embedded devices"
+edition = "2021"
 license = "MIT"
-categories = ["no-std", "embedded", "visualization"]
+name = "embedded-dal"
 readme = "README.md"
+version = "0.0.0"
+
+[features]
+default = ["defmt", "event_process", "fmc", "stm32f469"]
+defmt = ["dep:defmt"]
+event_process = []
+fmc = ["dep:stm32-fmc"]
+serde = ["dep:serde"]
+stm32f469 = ["dep:embedded-alloc"]
+
 
 [dependencies]
+embassy-stm32 = { version = "*", features = [
+    "defmt",
+    "exti",
+    "stm32f469ni",
+    "time-driver-any",
+    "unstable-pac",
+] }
+embassy-time = { version = "*", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+    "generic-queue-8",
+    "tick-hz-32_768",
+] }
+
+embassy-executor = { version = "*", features = [
+    "arch-cortex-m",
+    "defmt",
+    "executor-interrupt",
+    "executor-thread",
+    "task-arena-size-32768",
+    #"integrated-timers",
+] }
+
+embassy-embedded-hal = { version = "*", features = ["defmt"] }
+embassy-sync = { version = "*", features = ["defmt"] }
+embassy-futures = { version = "*", features = ["defmt"] }
+
+embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
+
+static_cell = "2.1.0"
+
+# embassy-stm32 still uses an older version, so we cannot upgrade to 0.4 (@2025-03-23)
+stm32-fmc = { version = "0.3.2", default-features = false, features = [
+    "sdram",
+], optional = true }
+
+
+embedded-alloc = { version = "0.6", optional = true, features = ["llff"] }
+
+# Remember to change the version of slint-build, as well!
+slint = { version = "1.10.0", default-features = false, features = [
+    "compat-1-2",
+    "libm",
+    "renderer-software",
+    "unsafe-single-threaded",
+] }
+
+defmt = { version = "0.3", optional = true }
+defmt-rtt = "0.4"
+
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+cortex-m = { version = "0.7.6", features = [
+    "critical-section-single-core",
+    "inline-asm",
+] }
+cortex-m-rt = "0.7.0"
+
+num_enum = { version = "0.7", default-features = false }
+
+pas-co2-rs = "0.1.0-beta.1"
+
+serde = { version = "1.0", optional = true }
+
+[build-dependencies]
+slint-build = { version = "1.10.0" }
 
 [badges]
 maintenance = { status = "actively-developed" }
+
+[profile.dev]
+debug = "full"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+incremental = false
+lto = "fat"
+opt-level = 's'
+
+
+[patch.crates-io]
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+
+# Slint has a font-size related bug in 1.10 that is fixed on main: https://github.com/slint-ui/slint/issues/7936
+slint = { git = "https://github.com/slint-ui/slint.git", rev = "f930e363d1122257b7981e2a719014da4279cc43" }
+slint-build = { git = "https://github.com/slint-ui/slint.git", rev = "f930e363d1122257b7981e2a719014da4279cc43" }

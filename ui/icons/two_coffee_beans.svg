@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="70px" height="70px" viewBox="0 0 67 60" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <g transform="matrix(1,0,0,1,-364.528,-155.15)">
+        <g id="coffee_bean.afdesign" transform="matrix(0.782453,0,0,0.782453,406.019,185.151)">
+            <g transform="matrix(1,0,0,1,-26.0999,-28.3397)">
+                <clipPath id="_clip1">
+                    <rect x="0" y="0" width="52.2" height="56.679"/>
+                </clipPath>
+                <g clip-path="url(#_clip1)">
+                    <g id="Bean" transform="matrix(0.805649,0,0,0.805649,-108.041,-65.1155)">
+                        <g transform="matrix(0.614488,-0.788926,0.788926,0.614488,-27.3277,176.076)">
+                            <ellipse cx="166.5" cy="116" rx="37.5" ry="26" style="fill:rgb(227,59,38);stroke:rgb(24,40,65);stroke-width:3.1px;"/>
+                        </g>
+                        <path d="M187.677,86.461C188.124,86.461 187.752,106.848 166.5,113.924C144.129,121.374 144.649,145.506 144.649,145.237" style="fill:none;stroke:rgb(24,40,65);stroke-width:3.1px;"/>
+                    </g>
+                </g>
+            </g>
+        </g>
+        <g id="coffee_bean.afdesign1" serif:id="coffee_bean.afdesign" transform="matrix(0.648305,-0.438101,0.438101,0.648305,388.864,184.957)">
+            <g transform="matrix(1,0,0,1,-26.0999,-28.3397)">
+                <clipPath id="_clip2">
+                    <rect x="0" y="0" width="52.2" height="56.679"/>
+                </clipPath>
+                <g clip-path="url(#_clip2)">
+                    <g id="Bean1" serif:id="Bean" transform="matrix(0.805649,0,0,0.805649,-108.041,-65.1155)">
+                        <g transform="matrix(0.614488,-0.788926,0.788926,0.614488,-27.3277,176.076)">
+                            <ellipse cx="166.5" cy="116" rx="37.5" ry="26" style="fill:rgb(227,59,38);stroke:rgb(24,40,65);stroke-width:3.1px;"/>
+                        </g>
+                        <path d="M187.677,86.461C188.124,86.461 187.752,106.848 166.5,113.924C144.129,121.374 144.649,145.506 144.649,145.237" style="fill:none;stroke:rgb(24,40,65);stroke-width:3.1px;"/>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>

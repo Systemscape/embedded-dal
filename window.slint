@@ -1,0 +1,256 @@
+component MyButton inherits Rectangle {
+    in property <length> button-height: 80px;
+    callback clicked <=> touch.clicked;
+
+    border-radius: root.height / 2;
+    border-width: 3px;
+    border-color: root.background.darker(45%);
+    background: touch.pressed ? #6b8282 : touch.has-hover ? #6c616c : lightgray;
+
+    height: button-height;
+
+    @children
+
+    touch := TouchArea { }
+}
+
+export enum Ampel { unknown, calibration, green, yellow, red}
+
+export component MainWindow inherits Window {
+    title: "CO2 Monitor";
+    min-width: 800px;
+    min-height: 480px;
+    background: white;
+    property <length> ampel_offset: 25px;
+    property <length> ampel_spacing: 20px;
+    property <length> ampel_diameter: 70px;
+    property <length> ampel_border_margin: 10px;
+    property <float> ampel_alpha: 0.15;
+    property <length> padding-outer: 20px;
+
+    in property <Ampel> ampel_value: Ampel.unknown;
+
+    in property <int> co2_ppm: 3333;
+    in property <string> status_text: "Status...";
+    in property <string> in_progress: "";
+    in property <int> time_since_last: 0;
+
+    callback start_measurement();
+    callback brightness_increase();
+    callback brightness_decrease();
+    callback rotate_screen();
+    callback force_compensation();
+
+    co2text := Text {
+        x: 100px;
+        y: 45px;
+        width: parent.width - self.x;
+        wrap: TextWrap.no-wrap;
+        horizontal-alignment: center;
+        text: co2_ppm;
+        font-size: 270px; // 256px makes it crash in dubious ways with 1.10 -> https://github.com/slint-ui/slint/issues/7936
+        //letter-spacing: 10px;
+        color: black;
+    }
+
+    Text {
+        x: padding-outer;
+        y: 425px;
+        horizontal-alignment: left;
+        text: "Letzte Messung: " + time_since_last + " s";
+        font-size: 20px;
+    }
+
+    Text {
+        x: padding-outer;
+        y: root.height - padding-outer;
+        horizontal-alignment: left;
+        text: status_text;
+        font-size: 15px;
+    }
+
+    Image {
+        horizontal-alignment: center;
+        y: 5px;
+        height: 90px;
+        source: @image-url("./Systemscape_Logo.png");
+    }
+
+    MyButton {
+        x: root.width - self.width - padding-outer;
+        y: 15px;
+
+        min-width: 0px;
+        width: 90px;
+
+        clicked => {
+            force_compensation();
+            debug("force_compensation()");
+        }
+
+        Text {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            color: black;
+
+            text: "Cal";
+            font-size: 30px;
+        }
+    }
+
+
+    // Currently unused. This won't render when set inside the measure_co2 function.
+    in_progress_text := Text {
+        x: 350px;
+        y: 80px;
+        text: in_progress;
+        horizontal-alignment: left;
+        font-size: 20px;
+    }
+
+    TouchArea {
+        x: 0px;
+        width: 50%;
+        clicked => {
+            debug("start_measurement()");
+            root.start_measurement();
+        }
+
+        Rectangle {
+            x: 30px - ampel_border_margin;
+            y: ampel_offset + ampel_diameter + ampel_spacing - ampel_border_margin;
+
+            width: ampel_diameter + 2 * ampel_border_margin;
+            height: 3 * ampel_diameter + 2 * ampel_spacing + 2 * ampel_border_margin;
+            border-radius: root.width / 2;
+            border-width: 2px;
+            border-color: gray;
+        }
+
+        if ampel_value == Ampel.unknown: Rectangle {
+            x: 30px;
+            y: root.ampel_offset;
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: gray;
+        }
+        if ampel_value == Ampel.calibration: Rectangle {
+            x: 30px;
+            y: ampel_offset;
+
+            text := Text {
+                text: "CAL";
+                font-weight: 900;
+                font-size: 20px;
+                color: black;
+                animate color {
+                    duration: 2000ms;
+                    direction: alternate;
+                    iteration-count: -1;
+                }
+            }
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: blue.with-alpha(0.7);
+            animate background {
+                duration: 2000ms;
+                direction: alternate;
+                iteration-count: -1;
+            }
+        }
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + ampel_diameter + ampel_spacing;
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.red ? red : red.with-alpha(ampel_alpha);
+        }
+
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + 2 * (ampel_diameter + ampel_spacing);
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.yellow ? orange : orange.with-alpha(ampel_alpha);
+        }
+
+        Rectangle {
+            x: 30px;
+            y: ampel_offset + 3 * (ampel_diameter + ampel_spacing);
+
+            width: ampel_diameter;
+            height: ampel_diameter;
+            border-radius: root.width / 2;
+            background: ampel_value == Ampel.green ? green : green.with-alpha(ampel_alpha);
+        }
+    }
+
+    HorizontalLayout {
+        height: 60px;
+        spacing: 20px;
+        padding-right: padding-outer;
+        y: 390px;
+
+        alignment: end;
+
+        MyButton {
+            width: 100px;
+            
+            clicked => {
+                rotate_screen();
+                debug("rotate_screen()");
+            }
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "↺";
+                font-size: 70px;
+            }
+        }
+
+        MyButton {
+            width: 100px;
+            
+            clicked => {
+                brightness_decrease();
+                debug("brightness_decrease()");
+            }
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "☼";
+                font-size: 40px;
+            }
+        }
+
+        MyButton {
+            width: 100px;
+            
+            clicked => {
+                brightness_increase();
+                debug("brightness_increase()");
+            }
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                color: black;
+                text: "☼";
+                font-size: 70px;
+            }
+        }
+    }
+
+}

@@ -1,0 +1,50 @@
+import { NavButton } from "../components/nav-button.slint";
+import { GlobalSettings } from "../global_settings.slint";
+
+export component Page {
+
+    horizontal-sep := Rectangle {
+        y: 370px;
+        border-color: black;
+        border-width: 1px;
+        height: 2px;
+        width: 100%;
+    }
+
+    VerticalLayout {
+        @children
+        // Back and Start menu
+        HorizontalLayout {
+            //height: 100px;
+            width: 800px;
+            alignment: space-between;
+            padding: 10px;
+            // Back button
+                // Start Button
+            back-btn := NavButton {
+                text: "Back";
+                icon: @image-url("../icons/arrow_back.svg");
+                height: 90px;
+                width: 250px;
+                clicked => {
+                    GlobalSettings.current-page = 0;
+                    debug("clicked back");
+                }
+            }
+
+            // Start Button
+            start-btn := NavButton {
+                text: "Start";
+                icon: @image-url("../icons/play_button.svg");
+                height: 90px;
+                width: 250px;
+                icon-right: true;
+
+                clicked => {
+                    GlobalSettings.current-page = 1;
+                    debug("clicked start");
+                }
+            }
+        }
+    }
+}
