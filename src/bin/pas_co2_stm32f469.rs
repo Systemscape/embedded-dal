@@ -228,7 +228,7 @@ impl<'a> Stm32F469IDisco<'a> {
             p.PH3,  // SDNE0
             p.PF11, // SDNRAS
             p.PC0,  // SDNWE
-            embedded_dal::drivers::is42s32400f::Is42s32400f6 {},
+            stm32_fmc::devices::is42s32400f_6::Is42s32400f6 {},
         );
 
         // It has 128 Mbit / 16 MByte of RAM. 4 banks, 1M (=1024 K) x 32 bits
