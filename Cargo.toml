@@ -5,7 +5,7 @@ authors = [
 ]
 categories = ["embedded", "no-std", "visualization"]
 description = "A display abstraction layer for embedded devices"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 name = "embedded-dal"
 readme = "README.md"
@@ -21,20 +21,7 @@ stm32f469 = ["dep:embedded-alloc"]
 
 
 [dependencies]
-embassy-stm32 = { version = "*", features = [
-    "defmt",
-    "exti",
-    "stm32f469ni",
-    "time-driver-any",
-    "unstable-pac",
-] }
-embassy-time = { version = "*", features = [
-    "defmt",
-    "defmt-timestamp-uptime",
-    "generic-queue-8",
-    "tick-hz-32_768",
-] }
-
+embassy-embedded-hal = { version = "*", features = ["defmt"] }
 embassy-executor = { version = "*", features = [
     "arch-cortex-m",
     "defmt",
@@ -43,11 +30,23 @@ embassy-executor = { version = "*", features = [
     "task-arena-size-32768",
     #"integrated-timers",
 ] }
-
-embassy-embedded-hal = { version = "*", features = ["defmt"] }
-embassy-sync = { version = "*", features = ["defmt"] }
 embassy-futures = { version = "*", features = ["defmt"] }
+embassy-stm32 = { version = "*", features = [
+    "defmt",
+    "exti",
+    "stm32f469ni",
+    "time-driver-any",
+    "unstable-pac",
+] }
+embassy-sync = { version = "*", features = ["defmt"] }
+embassy-time = { version = "*", features = [
+    "defmt",
+    "defmt-timestamp-uptime",
+    "generic-queue-8",
+    "tick-hz-32_768",
+] }
 
+embedded-alloc = { version = "0.6", optional = true, features = ["llff"] }
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 
@@ -59,7 +58,19 @@ stm32-fmc = { version = "0.3.2", default-features = false, features = [
 ], optional = true }
 
 
-embedded-alloc = { version = "0.6", optional = true, features = ["llff"] }
+defmt = { version = "1.0.1", optional = true }
+defmt-rtt = "1.0.0"
+panic-probe = { version = "1.0.0", features = ["print-defmt"] }
+
+serde = { version = "1.0", optional = true }
+
+num_enum = { version = "0.7", default-features = false }
+
+cortex-m = { version = "0.7.6", features = [
+    "critical-section-single-core",
+    "inline-asm",
+] }
+cortex-m-rt = "0.7.0"
 
 # Remember to change the version of slint-build, as well!
 slint = { version = "1.11.0", default-features = false, features = [
@@ -69,22 +80,8 @@ slint = { version = "1.11.0", default-features = false, features = [
     "unsafe-single-threaded",
 ] }
 
-defmt = { version = "1.0.1", optional = true }
-defmt-rtt = "1.0.0"
-
-panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-
-cortex-m = { version = "0.7.6", features = [
-    "critical-section-single-core",
-    "inline-asm",
-] }
-cortex-m-rt = "0.7.0"
-
-num_enum = { version = "0.7", default-features = false }
-
 pas-co2-rs = "0.1.0-beta.1"
 
-serde = { version = "1.0", optional = true }
 
 [build-dependencies]
 slint-build = { version = "1.11.0" }

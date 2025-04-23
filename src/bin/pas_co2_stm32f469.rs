@@ -88,7 +88,7 @@ static TRIGGER_RENDERER: Channel<
 > = Channel::new();
 static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, I2c<'static, Async>>> = StaticCell::new();
 
-#[link_section = ".frame_buffer"]
+#[unsafe (link_section = ".frame_buffer")]
 static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     a: 0,
     r: 0,
@@ -96,7 +96,7 @@ static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     b: 0,
 }; NUM_PIXELS];
 
-#[link_section = ".frame_buffer"]
+#[unsafe(link_section = ".frame_buffer")]
 static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     a: 0,
     r: 0,
@@ -120,12 +120,12 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
 unsafe fn UART4() {
-    EXECUTOR_HIGH.on_interrupt()
+    unsafe { EXECUTOR_HIGH.on_interrupt() }
 }
 
 #[interrupt]
 unsafe fn UART5() {
-    EXECUTOR_MED.on_interrupt()
+    unsafe { EXECUTOR_MED.on_interrupt() }
 }
 
 bind_interrupts!(struct Irqs {

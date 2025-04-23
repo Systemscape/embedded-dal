@@ -53,7 +53,7 @@ impl Backend {
     }
 
     fn init_assets(qspi_flash: &mut Qspi<QUADSPI, Async>) {
-        extern "C" {
+        unsafe extern "C" {
             static mut __s_slint_assets: u8;
             static __e_slint_assets: u8;
             static __si_slint_assets: u8;
