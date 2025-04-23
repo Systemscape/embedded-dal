@@ -4,7 +4,7 @@ use embassy_stm32::{
         ltdc::vals::{Bf1, Bf2, Depol, Hspol, Pcpol, Pf, Vbr, Vspol},
         LTDC,
     },
-    peripherals::LTDC,
+    peripherals::LTDC, Peri,
 };
 
 pub struct Window {
@@ -38,8 +38,8 @@ pub struct Ltdc<'a> {
     pub ltdc: embassy_stm32::ltdc::Ltdc<'a, LTDC>,
 }
 
-impl Ltdc<'_> {
-    pub fn new(ltdc: LTDC, dsi_config: &crate::drivers::dsi::Config) -> Self {
+impl<'a> Ltdc<'a> {
+    pub fn new(ltdc: Peri<'a, LTDC>, dsi_config: &crate::drivers::dsi::Config) -> Self {
         let mut ltdc = embassy_stm32::ltdc::Ltdc::new(ltdc);
 
         // Here comes HAL_DSI_ConfigPhyTimer() in the BSP example. We have already configured it at the beginning.

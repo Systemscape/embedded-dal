@@ -53,7 +53,7 @@ embedded-hal-async = "1.0.0"
 
 static_cell = "2.1.0"
 
-# embassy-stm32 still uses an older version, so we cannot upgrade to 0.4 (@2025-03-23)
+# embassy-stm32 still uses an older version, so we cannot upgrade to 0.4 (@2025-04-25)
 stm32-fmc = { version = "0.3.2", default-features = false, features = [
     "sdram",
 ], optional = true }
@@ -104,9 +104,9 @@ opt-level = 's'
 
 
 [patch.crates-io]
-embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
-embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "4033a619a87da733e2087bb7a2eb92017b33a9c5" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
+embassy-stm32 = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy.git", rev = "9907f5683bc3d2c436e03143b32c20c41251f457" }
