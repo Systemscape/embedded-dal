@@ -10,7 +10,7 @@ Currently contains a working example of a CO2 monitor using
 - [Slint](https://slint.dev/) as a UI framework
 - STM32F469 Discovery Kit
 
-![Image of demo](/images/pas_co2_stm32f469_demo.jpg | width=500)
+<img src="images/pas_co2_stm32f469_demo.jpg" width="400">
 
 ## Running
 Connect an Infineon PAS CO2 sensor to PB8 (SCL) and PB9 (SDA) and run
