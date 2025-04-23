@@ -295,6 +295,8 @@ impl<'a> Stm32F469IDisco<'a> {
 
         unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
 
+
+        // Setup I2C for the touch screen and the CO2 Sensor
         let mut config = embassy_stm32::i2c::Config::default();
         config.sda_pullup = true;
         config.scl_pullup = true;

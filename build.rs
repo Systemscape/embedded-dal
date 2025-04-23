@@ -20,13 +20,13 @@ fn main() {
     // here, we ensure the build script is only re-run when
     // `memory.x` is changed.
     println!("cargo:rerun-if-changed=memory_stm32f469ni.x");
-    println!("cargo:rerun-if-changed=window.slint");
+    println!("cargo:rerun-if-changed=pas_co2_stm32f469.slint");
 
     let config = slint_build::CompilerConfiguration::new()
         .embed_resources(slint_build::EmbedResourcesKind::EmbedForSoftwareRenderer)
         .with_style("native".into());
     //slint_build::compile_with_config("ui/display_mock.slint", config).unwrap();
-    slint_build::compile_with_config("window.slint", config).unwrap();
+    slint_build::compile_with_config("pas_co2_stm32f469.slint", config).unwrap();
     slint_build::print_rustc_flags().unwrap();
 
     println!("cargo:EMBED_TEXTURES=1");
