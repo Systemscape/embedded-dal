@@ -88,7 +88,7 @@ static TRIGGER_RENDERER: Channel<
 > = Channel::new();
 static I2C_BUS: StaticCell<Mutex<CriticalSectionRawMutex, I2c<'static, Async>>> = StaticCell::new();
 
-#[link_section = ".frame_buffer"]
+#[unsafe (link_section = ".frame_buffer")]
 static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     a: 0,
     r: 0,
@@ -96,7 +96,7 @@ static mut FB1: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     b: 0,
 }; NUM_PIXELS];
 
-#[link_section = ".frame_buffer"]
+#[unsafe(link_section = ".frame_buffer")]
 static mut FB2: [TargetPixel; NUM_PIXELS] = [TargetPixel {
     a: 0,
     r: 0,
@@ -120,12 +120,12 @@ static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
 #[interrupt]
 unsafe fn UART4() {
-    EXECUTOR_HIGH.on_interrupt()
+    unsafe { EXECUTOR_HIGH.on_interrupt() }
 }
 
 #[interrupt]
 unsafe fn UART5() {
-    EXECUTOR_MED.on_interrupt()
+    unsafe { EXECUTOR_MED.on_interrupt() }
 }
 
 bind_interrupts!(struct Irqs {
@@ -228,7 +228,7 @@ impl<'a> Stm32F469IDisco<'a> {
             p.PH3,  // SDNE0
             p.PF11, // SDNRAS
             p.PC0,  // SDNWE
-            embedded_dal::drivers::is42s32400f::Is42s32400f6 {},
+            stm32_fmc::devices::is42s32400f_6::Is42s32400f6 {},
         );
 
         // It has 128 Mbit / 16 MByte of RAM. 4 banks, 1M (=1024 K) x 32 bits
@@ -295,6 +295,8 @@ impl<'a> Stm32F469IDisco<'a> {
 
         unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
 
+
+        // Setup I2C for the touch screen and the CO2 Sensor
         let mut config = embassy_stm32::i2c::Config::default();
         config.sda_pullup = true;
         config.scl_pullup = true;

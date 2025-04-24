@@ -5,6 +5,7 @@ use embassy_stm32::{
         DSIHOST,
     },
     peripherals::{DSIHOST, PJ2},
+    Peri,
 };
 
 use crate::config::{Dimensions, Orientation};
@@ -140,11 +141,11 @@ pub const fn to_clock_cycles(val: u16, lane_byte_clk_k_hz: u16, lcd_clk: u16) ->
     ((val as u32 * lane_byte_clk_k_hz as u32) / lcd_clk as u32) as u16
 }
 
-impl Dsi<'_> {
+impl<'a> Dsi<'a> {
     /// Basic configuration of the DSIHOST
     ///
     /// Leaves DSIHOST disabled! **call `enable()` when all config is done before using**.
-    pub fn new(dsi: DSIHOST, tepin: PJ2, config: &Config) -> Self {
+    pub fn new(dsi: Peri<'a, DSIHOST>, tepin: Peri<'a, PJ2>, config: &Config) -> Self {
         let mut dsi = DsiHost::new(dsi, tepin);
 
         let version = dsi.get_version();

@@ -48,8 +48,7 @@ export component MainWindow inherits Window {
         wrap: TextWrap.no-wrap;
         horizontal-alignment: center;
         text: co2_ppm;
-        font-size: 270px; // 256px makes it crash in dubious ways with 1.10 -> https://github.com/slint-ui/slint/issues/7936
-        //letter-spacing: 10px;
+        font-size: 270px;
         color: black;
     }
 
@@ -57,7 +56,7 @@ export component MainWindow inherits Window {
         x: padding-outer;
         y: 425px;
         horizontal-alignment: left;
-        text: "Letzte Messung: " + time_since_last + " s";
+        text: "Last measurement: " + time_since_last + " s";
         font-size: 20px;
     }
 
@@ -73,7 +72,7 @@ export component MainWindow inherits Window {
         horizontal-alignment: center;
         y: 5px;
         height: 90px;
-        source: @image-url("./Systemscape_Logo.png");
+        source: @image-url("./images/Systemscape_Logo.png");
     }
 
     MyButton {

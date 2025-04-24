@@ -8,11 +8,12 @@ rustflags = [
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
+  "-C", "target-cpu=cortex-m4", # https://rust-lang.github.io/packed_simd/perf-guide/target-feature/rustflags.html
 ]
 
 
 [build]
-target = "thumbv7em-none-eabi"
+target = "thumbv7em-none-eabihf"
 
 [env]
 DEFMT_LOG = "info"
